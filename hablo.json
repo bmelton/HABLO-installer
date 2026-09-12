@@ -1,0 +1,54 @@
+{
+  "$comment": "HABLO machine manifest: what `install.mjs` puts in place. Edit here, not in the script.",
+  "pi": {
+    "packages": [
+      "npm:pi-agents",
+      "npm:pi-usage-meters",
+      "npm:pi-bedrouter",
+      "npm:pi-openwiki-adapter"
+    ],
+    "optionalPackages": [
+      "npm:pi-web-access",
+      "npm:pi-vision-handoff",
+      "npm:pi-impeccable",
+      "npm:pi-openai-codex-usage"
+    ],
+    "enabledModels": [
+      "bedrouter/auto",
+      "bedrouter/auto-oss",
+      "bedrouter/haiku",
+      "bedrouter/sonnet",
+      "bedrouter/opus",
+      "bedrouter/gpt-oss-20b",
+      "bedrouter/gpt-oss-120b"
+    ],
+    "settings": {
+      "steeringMode": "one-at-a-time",
+      "hideThinkingBlock": true,
+      "markdown": { "mermaid": "streaming" }
+    }
+  },
+  "bedrouter": {
+    "home": "~/.bedrouter",
+    "port": 20129,
+    "region": "us-east-1",
+    "routing": {
+      "honorClientModel": false,
+      "classifier": { "enabled": true, "model": "haiku", "mode": "fallback" }
+    },
+    "ladders": {
+      "claude": { "family": "anthropic", "autoSelect": "auto" },
+      "oss": { "family": "openai", "autoSelect": "auto-oss" }
+    },
+    "fallbacks": {
+      "$comment": "When the probe says a rung is not entitled on this account, try these Bedrock IDs in order before dropping the rung.",
+      "us.anthropic.claude-opus-5": ["us.anthropic.claude-opus-4-8", "us.anthropic.claude-opus-4-7", "us.anthropic.claude-opus-4-6-v1"],
+      "us.anthropic.claude-sonnet-5": ["us.anthropic.claude-sonnet-4-6", "us.anthropic.claude-sonnet-4-5-20250929-v1:0"],
+      "us.anthropic.claude-fable-5-1": []
+    }
+  },
+  "openwiki": {
+    "npmPackage": "openwiki",
+    "minNode": 22
+  }
+}
