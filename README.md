@@ -78,9 +78,52 @@ rm -rf ~/.pi.old-*                         # when satisfied
 
 Step 4 matters on machines where `~/.pi/agent/settings.json` and friends are stow symlinks into `~/.dotfiles/pi`: with the links in place, the installer edits the dotfiles copy (it says so: "settings.json is a symlink … dotfiles-managed"), and `--restore` leaves those files alone because they already exist. Skip step 4 on a machine without dotfiles; the installer then creates plain files.
 
+## Before you run it: an AWS profile that can call Bedrock
+
+The installer needs the name of an AWS CLI profile (`--profile <name>`); bedrouter uses it through the standard SDK credential chain, and the profile has to belong to a principal allowed to call Bedrock (`bedrock:InvokeModel`, `bedrock:InvokeModelWithResponseStream`; the read-only `bedrock:ListFoundationModels` / `GetFoundationModel` / `ListInferenceProfiles` / `GetInferenceProfile` / `GetFoundationModelAvailability` let the probe explain denials). Create it once per machine, before the installer, so step 5 finds it. Install the AWS CLI first if needed (`brew install awscli`).
+
+**Corporate account (AWS IAM Identity Center / SSO).** Run the CLI's wizard and answer with your organisation's values:
+
+```sh
+aws configure sso --profile bedrouter
+#   SSO session name:  anything, e.g. corp
+#   SSO start URL:     your organisation's access portal URL (https://<something>.awsapps.com/start)
+#   SSO region:        the region the portal lives in
+#   → browser opens; sign in and approve the device
+#   Account / role:    pick the account and the role that has Bedrock access
+#   CLI default region: the Bedrock region you will use (us-east-1 for the default ladder)
+#   CLI default output: json
+```
+
+The profile name is yours to choose; `bedrouter` keeps every command in this README valid. If your organisation already generated a profile for you (`aws configure list-profiles`), use that name with `--profile` instead — the name is arbitrary, only the `sso_role_name` behind it matters. Then:
+
+```sh
+aws sso login --profile bedrouter
+aws sts get-caller-identity --profile bedrouter    # an arn:aws:sts::<account>:assumed-role/AWSReservedSSO_<role>_<hash>/<you> line
+```
+
+The SSO token expires (typically 8–12 hours); `aws sso login --profile bedrouter` again is the fix, and bedrouter's own startup check says so when it happens.
+
+**Personal account.** Enable IAM Identity Center on the account, add a user, create a permission set with the Bedrock actions above, assign both to the account, submit Anthropic's one-time use-case form from the Bedrock model catalog, and make one call to a Claude model in the console playground as an admin (that performs the Marketplace subscription a restricted role cannot). The bedrouter README walks through it. The `~/.aws/config` entry then looks like:
+
+```ini
+[sso-session personal]
+sso_start_url = https://d-xxxxxxxxxx.awsapps.com/start
+sso_region = us-east-1
+sso_registration_scopes = sso:account:access
+
+[profile bedrouter]
+sso_session = personal
+sso_account_id = 123456789012
+sso_role_name = BedrockInvoke
+region = us-east-1
+```
+
+**If you skip this.** With `--profile` naming a profile that does not exist, step 5 runs `aws configure sso --profile <name>` for you (interactive, same questions as above); without `--profile` at all, the AWS and probe steps are skipped and `~/.bedrouter/.env` is written with a commented-out `AWS_PROFILE` for you to fill in. Static keys (`AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY`) or a Bedrock API key (`AWS_BEARER_TOKEN_BEDROCK`) in `~/.bedrouter/.env` work too; the installer never stores credentials itself.
+
 ## Prerequisites
 
-Node 20+ (22+ if you also want OpenWiki), Pi (installed for you with `--install-pi`, or `npm install -g @earendil-works/pi-coding-agent`), the AWS CLI for SSO login, git. An AWS principal allowed to call Bedrock (`bedrock:InvokeModel*`; the read-only `bedrock:List*`/`Get*` help the probe explain itself). On a personal account the bedrouter README describes the IAM Identity Center setup; on a corporate account `aws configure sso` against the corporate start URL is all it takes.
+Node 20+ (22+ if you also want OpenWiki), Pi (installed for you with `--install-pi`, or `npm install -g @earendil-works/pi-coding-agent`), the AWS CLI with a Bedrock-capable profile (previous section), git.
 
 ## Files
 
