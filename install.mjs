@@ -112,13 +112,18 @@ note(owBin ? `openwiki ${owBin}` : `openwiki not installed (optional):  npm inst
 step(2, "pi packages");
 const settingsPath = path.join(agentDir, "settings.json");
 let settings = readJson(settingsPath, {});
-const wanted = [...manifest.pi.packages, ...(flag("optional") ? manifest.pi.optionalPackages : [])];
 const installed = new Set(settings.packages ?? []);
+// Everything the manifest asks for, plus anything settings.json already lists (packages you added yourself): after a
+// reinstall the list survives in settings/dotfiles but the code under ~/.pi/agent/npm does not, so honour the list.
+const listedRemote = [...installed].filter((p) => /^(npm|git):/.test(p));
+const wanted = [...new Set([...manifest.pi.packages, ...(flag("optional") ? manifest.pi.optionalPackages : []), ...listedRemote])];
+const localPaths = [...installed].filter((p) => !/^(npm|git):/.test(p));
+for (const p of localPaths) if (!fs.existsSync(path.resolve(agentDir, p))) note(`${p} is listed as a path package but the path does not exist; clone or remove it from settings.json`);
 for (const pkg of wanted) {
-  const bare = pkg.replace(/^npm:/, "");
+  const bare = pkg.replace(/^npm:/, "").replace(/@[^@/]+$/, "").replace(/^git:.*\/([^/@]+?)(?:\.git)?(?:@.*)?$/, "$1");
   const listed = installed.has(pkg) || [...installed].some((p) => p.endsWith(`/${bare}`));
   // listed in settings.json but absent on disk (e.g. after a reinstall that restored settings): install anyway
-  const onDisk = pkg.startsWith("npm:") ? fs.existsSync(path.join(agentDir, "npm", "node_modules", bare, "package.json")) : true;
+  const onDisk = /^(npm|git):/.test(pkg) ? fs.existsSync(path.join(agentDir, "npm", "node_modules", bare, "package.json")) : true;
   if (listed && onDisk) { note(`${pkg} already installed`); continue; }
   if (listed && !onDisk) note(`${pkg} is listed but missing on disk; reinstalling`);
   did(`pi install ${pkg}`);
