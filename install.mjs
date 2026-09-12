@@ -6,7 +6,8 @@
 //   node install.mjs --profile <aws-profile> [--restore <tgz>] [--ladder claude|oss] [--dry-run] [--optional] [--default-model]
 //                    [--skip-aws] [--skip-probe] [--skip-agents] [--force-agents] [--home <dir>]
 //                    [--skip-firstmate] [--firstmate-dir <dir>] [--backend tmux|herdr] [--no-branch-policy] [--base-branch <name>]
-//                    [--skip-cli] [--bin-dir <dir>]   the `hablo` command (default ~/.local/bin) and its Pi extension (~/.hablo)
+//                    [--skip-cli] [--bin-dir <dir>] [--cli-model <m>]   the `hablo` command (default ~/.local/bin) and its Pi extension
+//                    [--skip-tools] [--update-tools]   firstmate's tool dependencies (treehouse, no-mistakes, *-axi)
 //                    [--install-pi] [--pi-manager npm|bun|pnpm]   install the Pi CLI itself when it is missing
 //
 // Steps (each prints what it did or would do):
@@ -23,6 +24,8 @@
 //                 through bedrouter; captain.md branch-per-Jira-ticket policy (integration branch from the manifest,
 //                 default develop); optional config/backend (--backend herdr)
 //  10 cli         `hablo`: launch a firstmate captain from any project directory (wrapper + ~/.hablo/hablo-captain.ts)
+//  11 tools       firstmate's tool dependencies: npm -g gh-axi chrome-devtools-axi lavish-axi tasks-axi quota-axi;
+//                 treehouse and no-mistakes via their install scripts into ~/.local/bin (no sudo)
 import { execFileSync, spawnSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
@@ -405,11 +408,44 @@ else {
     if (!DRY) fs.chmodSync(dst, mode);
     did(`${cur === null ? "install" : "update"} ${path.relative(home, dst)}`);
   };
-  installFile(path.join(here, "bin", "hablo"), path.join(binDir, "hablo"), (t) => t.replace(/__FM_ROOT__/g, fmDir).replace(/__HABLO_HOME__/g, habloHome), 0o755);
+  const cliModel = opt("cli-model", cli.model ?? ladder.autoSelect);
+  installFile(path.join(here, "bin", "hablo"), path.join(binDir, "hablo"), (t) => t.replace(/__FM_ROOT__/g, fmDir).replace(/__HABLO_HOME__/g, habloHome).replace(/__PROVIDER__/g, cli.provider).replace(/__MODEL__/g, cliModel), 0o755);
+  note(`hablo defaults to --provider ${cli.provider} --model ${cliModel} (HABLO_PROVIDER / HABLO_MODEL or your own flags override)`);
   installFile(path.join(here, "pi", "extensions", "hablo-captain.ts"), path.join(habloHome, "hablo-captain.ts"), (t) => t, 0o644);
   const onPath = (process.env.PATH ?? "").split(path.delimiter).some((d) => d && path.resolve(expand(d)) === path.resolve(binDir));
   if (!onPath) note(`${binDir} is not on your PATH; add this to your shell rc:\n         export PATH="${binDir.replace(home, "$HOME")}:$PATH"`);
   for (const ext of ["fm-primary-turnend-guard.ts", "fm-primary-pi-watch.ts"]) if (fs.existsSync(fmDir) && !fs.existsSync(path.join(fmDir, ".pi", "extensions", ext))) note(`firstmate has no .pi/extensions/${ext} (upstream layout changed?); hablo skips missing extensions but the captain may lack supervision`);
+}
+
+// ---- 11 firstmate tools ----------------------------------------------------------------------------------------------------
+step(11, "firstmate tool dependencies (treehouse, no-mistakes, *-axi)");
+if (flag("skip-tools") || flag("skip-firstmate")) note(`skipped (${flag("skip-tools") ? "--skip-tools" : "--skip-firstmate"})`);
+else {
+  const tools = fm.tools;
+  const upd = flag("update-tools");
+  // Both install scripts pick ~/.local/bin when it exists and is on PATH (treehouse) or when told to (no-mistakes),
+  // which keeps them sudo-free; make sure of both for the child processes.
+  if (!DRY) fs.mkdirSync(binDir, { recursive: true });
+  const childPath = (process.env.PATH ?? "").split(path.delimiter).includes(binDir) ? process.env.PATH : `${binDir}${path.delimiter}${process.env.PATH ?? ""}`;
+  const ver = (t) => (run(t, ["--version"], { env: { PATH: childPath }, timeout: 20_000 }).stdout ?? "").trim().split("\n")[0];
+  const present = (t) => !!spawnSync("sh", ["-c", `command -v ${t}`], { encoding: "utf8", env: { ...process.env, PATH: childPath } }).stdout.trim();
+  const npmMissing = tools.npm.filter((t) => upd || !present(t));
+  for (const t of tools.npm.filter((t) => !npmMissing.includes(t))) note(`${t} present (${ver(t) || "version unknown"})`);
+  if (npmMissing.length) {
+    did(`npm install -g ${npmMissing.join(" ")}`);
+    if (!DRY) { const r = run("npm", ["install", "-g", ...npmMissing], { inherit: true, timeout: 600_000 }); if (r.status !== 0) warn(`npm install -g ${npmMissing.join(" ")} failed (exit ${r.status}); firstmate will report them as MISSING`); }
+  }
+  for (const [t, url] of Object.entries(tools.scripts)) {
+    if (present(t) && !upd) { note(`${t} present (${ver(t) || "version unknown"})`); continue; }
+    if (!which("curl")) { warn(`curl is missing; cannot install ${t} (${url})`); continue; }
+    did(`curl -fsSL ${url} | sh      (installs into ${binDir})`);
+    if (!DRY) {
+      const env = { PATH: childPath, NO_MISTAKES_LINK_DIR: binDir };
+      const r = spawnSync("sh", ["-c", `curl -fsSL "${url}" | sh`], { stdio: "inherit", env: { ...process.env, ...env }, timeout: 600_000 });
+      if (r.status !== 0 || !present(t)) warn(`${t} install did not complete (exit ${r.status}); run it by hand:  curl -fsSL ${url} | sh`);
+    }
+  }
+  note("(the *-axi `setup hooks` step is not run: it installs Claude Code/Codex/OpenCode session hooks, which Pi does not use)");
 }
 
 // ---- done ---------------------------------------------------------------------------------------------------------------

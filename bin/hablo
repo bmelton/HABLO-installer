@@ -13,17 +13,22 @@
 #   projects/<name>             -> a symlink to this directory, so scripts that expect projects/<name> keep working
 #   pi -e ...                   -> firstmate's tracked Pi extensions plus hablo-captain.ts, which injects AGENTS.md
 #                                  (with absolute bin/ paths) into the system prompt
+#   --provider/--model          -> the bedrouter provider and the ladder's auto model chosen at install time, unless
+#                                  you pass your own (or set HABLO_PROVIDER / HABLO_MODEL)
 # Bash 3.2 compatible (macOS); works on Linux and WSL. Nothing here needs root.
 set -eu
 
 FM_ROOT="${FM_ROOT:-__FM_ROOT__}"
 HABLO_HOME="${HABLO_HOME:-__HABLO_HOME__}"
 MODE="${HABLO_PROJECT_MODE:-direct-PR}"
+PROVIDER="${HABLO_PROVIDER:-__PROVIDER__}"
+MODEL="${HABLO_MODEL:-__MODEL__}"
 
 usage() {
   sed -n '2,20p' "$0" | sed 's/^# \{0,1\}//'
   echo
-  echo "env: FM_ROOT (firstmate checkout), FM_HOME (firstmate home, default FM_ROOT), HABLO_PROJECT_MODE (default direct-PR)"
+  echo "env: FM_ROOT (firstmate checkout), FM_HOME (firstmate home, default FM_ROOT), HABLO_PROJECT_MODE (default direct-PR),"
+  echo "     HABLO_PROVIDER / HABLO_MODEL (default $PROVIDER / $MODEL)"
 }
 case "${1:-}" in -h|--help|help) usage; exit 0;; esac
 
@@ -36,6 +41,12 @@ root_real="$(cd "$FM_ROOT" && pwd -P)"
 export FM_ROOT_OVERRIDE="$root_real"
 export FM_HOME="${FM_HOME:-$root_real}"
 export PATH="$root_real/bin:$PATH"
+
+# Default provider/model unless the caller chose their own.
+has_provider=0; has_model=0
+for a in "$@"; do case "$a" in --provider|--provider=*) has_provider=1;; --model|--model=*) has_model=1;; esac; done
+[ "$has_model" = 1 ] || set -- --model "$MODEL" "$@"
+[ "$has_provider" = 1 ] || set -- --provider "$PROVIDER" "$@"
 
 # Standing in the firstmate checkout itself: plain firstmate, its own discovery does the rest.
 if [ "$proj" = "$root_real" ]; then exec pi "$@"; fi

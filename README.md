@@ -25,6 +25,7 @@ Idempotent: run it again any time; it only changes what differs and never overwr
 | 9 | Clones (or fast-forwards) [kunchenguid/firstmate](https://github.com/kunchenguid/firstmate); crew harness `pi`; `config/crew-dispatch.json` routing every crewmate through bedrouter; the branch-per-Jira-ticket policy in `data/captain.md`; optional `config/backend`; checks for git, gh (authenticated), tmux, jq | `~/firstmate` (`--firstmate-dir`) |
 
 | 10 | Installs the `hablo` command and its Pi extension, so a firstmate captain can be started from any project directory (see [hablo](#hablo-firstmate-from-any-project-directory)) | `~/.local/bin/hablo` (`--bin-dir`), `~/.hablo/` |
+| 11 | Installs the tools firstmate's bootstrap otherwise reports as `MISSING`: `gh-axi`, `chrome-devtools-axi`, `lavish-axi`, `tasks-axi`, `quota-axi` (`npm install -g`), and `treehouse`, `no-mistakes` (their own install scripts, into `~/.local/bin`, no sudo). Only what is absent; `--update-tools` reinstalls everything | npm's global prefix, `~/.local/bin`, `~/.no-mistakes/` |
 
 Then: `pi --provider bedrouter --model auto` (or `auto-oss` with `--ladder oss`). For firstmate: `cd <your project> && hablo` (or `cd ~/firstmate && pi`) — firstmate's `AGENTS.md` takes over the session, and it spawns crewmates as `pi --model bedrouter/auto` processes in tmux, routed explicitly by the dispatch file the installer writes. pi-bedrouter starts the server on first use, shows what served each request in the footer, and `/bedrouter status|probe|report`, `/openwiki doctor` work from inside Pi.
 
@@ -44,7 +45,8 @@ Then: `pi --provider bedrouter --model auto` (or `auto-oss` with `--ladder oss`)
 | `--backend tmux \| herdr` | Write firstmate's `config/backend` (default: leave auto-detection, which is tmux) |
 | `--no-branch-policy` | Don't write the Jira-branch policy into firstmate's `data/captain.md` |
 | `--base-branch <name>` | Integration branch for the Jira-branch policy (default `develop` from the manifest) |
-| `--skip-cli` `--bin-dir <dir>` | Skip the `hablo` command, or install it somewhere other than `~/.local/bin` |
+| `--skip-cli` `--bin-dir <dir>` `--cli-model <m>` | Skip the `hablo` command, install it somewhere other than `~/.local/bin`, or change the model it defaults to (default: the ladder's auto alias) |
+| `--skip-tools` `--update-tools` | Skip firstmate's tool dependencies, or reinstall them even when present |
 | `--force-agents` | Overwrite existing agent profiles / workflows with the bundled ones |
 | `--dry-run` | Print, don't write |
 
@@ -172,12 +174,15 @@ firstmate wants to be launched inside its own checkout, because the harness disc
 
 ```sh
 cd ~/code/myproject
-hablo            # any extra arguments go to pi, e.g. hablo --model bedrouter/opus
+hablo            # = pi --provider bedrouter --model auto (or auto-oss with --ladder oss / --cli-model auto-oss)
+hablo --model bedrouter/opus     # your own --provider/--model win; HABLO_PROVIDER / HABLO_MODEL work too
 ```
 
 `hablo` (`bin/hablo` here, copied to `~/.local/bin/hablo` with the firstmate directory stamped in) exports `FM_ROOT_OVERRIDE` and `FM_HOME` pointing at the firstmate checkout, prepends `<firstmate>/bin` to `PATH`, registers the project once in `data/projects.md` (mode `direct-PR`, or `HABLO_PROJECT_MODE`), symlinks `projects/<name>` to the directory so scripts that expect that spelling keep working, and starts Pi in the project with firstmate's four Pi extensions plus `~/.hablo/hablo-captain.ts` passed as `-e`. That extension appends firstmate's `AGENTS.md` to the system prompt on every turn, with the 58 relative `bin/fm-*.sh` invocations rewritten to absolute paths, and tells the captain which project the session is about. Run from inside the firstmate checkout, `hablo` is just `pi`. It needs bash 3.2+ (macOS's), `git`, and `pi` on `PATH`; it works the same on macOS, Linux and WSL and never needs root, which is why it lives in `~/.local/bin` rather than `/usr/local/bin` (the installer prints the `PATH` line if that directory is not on it).
 
-Undo: `rm ~/.local/bin/hablo ~/.hablo/hablo-captain.ts`. The registry lines it added to `data/projects.md` and the `projects/<name>` symlinks are runtime artifacts; prune them by hand when a project is retired.
+Step 11 installs the tools firstmate's session start otherwise lists as missing (`treehouse`, `no-mistakes`, `gh-axi`, `chrome-devtools-axi`, `lavish-axi`, `tasks-axi`, `quota-axi`), using exactly the commands firstmate's own `bin/fm-bootstrap.sh` prints for them. The two shell-script installs fetch the latest release from GitHub; they land in `~/.local/bin` (treehouse chooses it because it exists and is on PATH; no-mistakes is told to with `NO_MISTAKES_LINK_DIR`), so nothing asks for sudo. The `*-axi setup hooks` step those READMEs mention is skipped on purpose: it installs session hooks for Claude Code, Codex and OpenCode, which Pi does not read, and it writes outside `~/.pi`. Undo: `npm uninstall -g gh-axi chrome-devtools-axi lavish-axi tasks-axi quota-axi; rm -rf ~/.local/bin/treehouse ~/.local/bin/no-mistakes ~/.no-mistakes`.
+
+Undo for hablo: `rm ~/.local/bin/hablo ~/.hablo/hablo-captain.ts`. The registry lines it added to `data/projects.md` and the `projects/<name>` symlinks are runtime artifacts; prune them by hand when a project is retired.
 
 ### What the installer changes in firstmate, and how to undo it
 

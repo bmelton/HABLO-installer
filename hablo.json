@@ -74,7 +74,10 @@
   "cli": {
     "$comment": "The `hablo` command: start a firstmate captain from any project directory (bin/hablo, stamped with the firstmate dir) plus the Pi extension that injects firstmate's AGENTS.md. User-space only: no sudo, no /usr/local.",
     "binDir": "~/.local/bin",
-    "home": "~/.hablo"
+    "home": "~/.hablo",
+    "provider": "bedrouter",
+    "model": null,
+    "$comment2": "model: what `hablo` passes as --model when you pass none; null = the chosen ladder's auto alias (auto / auto-oss). --cli-model overrides."
   },
   "openwiki": {
     "npmPackage": "openwiki",
@@ -95,6 +98,14 @@
     "baseBranch": "develop",
     "$comment3": "baseBranch: the integration branch ticket branches are cut from and merged back into (--base-branch overrides). The policy never targets the repository's default branch directly.",
     "backend": null,
+    "tools": {
+      "$comment": "What firstmate's bootstrap reports as MISSING when absent; installed by step 11 exactly as firstmate's own `install:` hints say. npm ones go to npm's global prefix; the two scripts install into ~/.local/bin (treehouse picks it because it exists and is on PATH; no-mistakes via NO_MISTAKES_LINK_DIR), so no sudo. `setup hooks` (Claude Code/Codex/OpenCode session hooks) is deliberately not run: Pi does not use them and they write outside ~/.pi.",
+      "npm": ["gh-axi", "chrome-devtools-axi", "lavish-axi", "tasks-axi", "quota-axi"],
+      "scripts": {
+        "treehouse": "https://kunchenguid.github.io/treehouse/install.sh",
+        "no-mistakes": "https://raw.githubusercontent.com/kunchenguid/no-mistakes/main/docs/install.sh"
+      }
+    },
     "$comment2": "backend: null keeps firstmate's auto-detection (tmux). Set \"herdr\" (or pass --backend herdr) to write config/backend."
   },
   "backup": {
