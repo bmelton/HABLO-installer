@@ -4,7 +4,7 @@ One command that takes a machine with Node and Pi on it to the HABLO setup: Pi p
 
 ```sh
 git clone <this repo> && cd HABLO-installer
-./install.sh --profile <aws-sso-profile>            # e.g. --profile BAHSSO_123456_ADMIN
+./install.sh --profile <aws-sso-profile>            # e.g. --profile <username>
 ```
 
 Idempotent: run it again any time; it only changes what differs and never overwrites your agent profiles unless told to. `--dry-run` prints the plan without writing anything.
