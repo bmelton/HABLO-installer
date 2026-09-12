@@ -100,6 +100,7 @@
     ],
     "crewDispatch": "firstmate/crew-dispatch.json",
     "captainPolicy": "firstmate/captain-branch-policy.md",
+    "openwikiPolicy": "firstmate/captain-openwiki-policy.md",
     "baseBranch": "develop",
     "$comment3": "baseBranch: the integration branch ticket branches are cut from and merged back into (--base-branch overrides). The policy never targets the repository's default branch directly.",
     "backend": null,

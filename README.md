@@ -44,6 +44,7 @@ Then: `pi --provider bedrouter --model auto-oss` (or `auto` with `--ladder claud
 | `--firstmate-dir <dir>` | Where to clone firstmate (default `~/firstmate`) |
 | `--backend tmux \| herdr` | Write firstmate's `config/backend` (default: leave auto-detection, which is tmux) |
 | `--no-branch-policy` | Don't write the Jira-branch policy into firstmate's `data/captain.md` |
+| `--no-openwiki-policy` | Don't write the OpenWiki-first policy into `data/captain.md` |
 | `--base-branch <name>` | Integration branch for the Jira-branch policy (default `develop` from the manifest) |
 | `--skip-cli` `--bin-dir <dir>` `--cli-model <m>` | Skip the `hablo` command, install it somewhere other than `~/.local/bin`, or change the model it defaults to (default: the ladder's auto alias) |
 | `--skip-tools` `--update-tools` | Skip firstmate's tool dependencies, or reinstall them even when present |
@@ -184,6 +185,10 @@ Step 11 installs the tools firstmate's session start otherwise lists as missing 
 
 Undo for hablo: `rm ~/.local/bin/hablo ~/.hablo/hablo-captain.ts`. The registry lines it added to `data/projects.md` and the `projects/<name>` symlinks are runtime artifacts; prune them by hand when a project is retired.
 
+### OpenWiki for the whole crew
+
+`pi-openwiki-adapter` is installed as a global Pi package (step 2), so every Pi process firstmate spawns has the `openwiki_*` tools and the adapter's own system-prompt nudge ("use OpenWiki first as a table of contents") — no per-crewmate wiring is needed. Two things are needed for that to actually bite. First, the tools only see a wiki that is in the process's working directory: crewmates run in disposable git worktrees, so `openwiki/` must be committed to the project (it is documentation; only OpenWiki's run-state files belong in `.gitignore`). Second, the nudge is mild, so the installer writes a second marked block into `data/captain.md` (`firstmate/captain-openwiki-policy.md`, `--no-openwiki-policy` to skip): the captain runs `/openwiki doctor` at the start of a voyage and offers `init`/`update` rather than running them silently, scouts with the wiki before dispatching and puts page names into briefs, includes wiki-first instructions verbatim in every crewmate's task text (orient with `openwiki_outline`/`openwiki_search`, trust code over wiki and report drift in the PR, never run updates in a worktree), and runs `/openwiki update` from the main checkout after a ticket merges, on the Claude ladder.
+
 ### What the installer changes in firstmate, and how to undo it
 
 Nothing tracked by firstmate's git repository is ever modified; `git status` inside the clone stays clean, which is what keeps `git pull --ff-only` working. The installer writes only these local, gitignored files, all of which firstmate itself designates as per-installation configuration:
@@ -193,7 +198,7 @@ Nothing tracked by firstmate's git repository is ever modified; `git status` ins
 | `config/crew-harness` | always (`pi`) | firstmate detects the crew harness itself |
 | `config/crew-dispatch.json` | always, unless a file not written by this installer is already there | dispatch falls back to `config/crew-harness`; crewmates use Pi's default model |
 | `config/backend` | only with `--backend` | firstmate auto-detects the backend (tmux) |
-| `data/captain.md` | unless `--no-branch-policy`; created if absent, otherwise the marked block is appended and the rest of the file is left byte-for-byte | remove the `<!-- HABLO:BRANCH-POLICY:START -->` … `END -->` block (or the file, if the installer created it) to drop the policy |
+| `data/captain.md` | unless `--no-branch-policy` / `--no-openwiki-policy`; created if absent, otherwise each marked block is appended and the rest of the file is left byte-for-byte | remove the `<!-- HABLO:BRANCH-POLICY:START -->` … `END -->` or `<!-- HABLO:OPENWIKI-POLICY:START -->` … `END -->` block (or the file, if the installer created it) to drop that policy |
 
 Full undo:
 

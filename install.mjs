@@ -7,6 +7,7 @@
 //                    (profile and ladder default to hablo.json "defaults": bedrouter / oss; AWS_PROFILE in the env also counts)
 //                    [--skip-aws] [--skip-probe] [--skip-agents] [--force-agents] [--home <dir>]
 //                    [--skip-firstmate] [--firstmate-dir <dir>] [--backend tmux|herdr] [--no-branch-policy] [--base-branch <name>]
+//                    [--no-openwiki-policy]
 //                    [--skip-cli] [--bin-dir <dir>] [--cli-model <m>]   the `hablo` command (default ~/.local/bin) and its Pi extension
 //                    [--skip-tools] [--update-tools]   firstmate's tool dependencies (treehouse, no-mistakes, *-axi)
 //                    [--install-pi] [--pi-manager npm|bun|pnpm]   install the Pi CLI itself when it is missing
@@ -379,16 +380,22 @@ else {
       const curB = fs.existsSync(bPath) ? fs.readFileSync(bPath, "utf8").trim() : "";
       if (curB !== backend) { writeText(bPath, backend + "\n"); did(`write ${path.relative(home, bPath)} = ${backend}`); } else note(`backend already ${backend}`);
     }
-    // Branch policy: a standing captain preference (data/captain.md is firstmate's canonical, gitignored policy file).
+    // Standing captain preferences (data/captain.md is firstmate's canonical, gitignored policy file): each policy is a
+    // marked block, replaced in place on re-runs, never touching anything else in the file.
+    const capPath = path.join(fmDir, "data", "captain.md");
+    const captainBlock = (marker, text, label) => {
+      const cur = fs.existsSync(capPath) ? fs.readFileSync(capPath, "utf8") : "";
+      const block = new RegExp(`<!-- HABLO:${marker}:START -->[\\s\\S]*?<!-- HABLO:${marker}:END -->\\n?`);
+      const next = block.test(cur) ? cur.replace(block, text) : (cur ? cur.replace(/\s*$/, "\n\n") : "# Captain preferences\n\n") + text;
+      if (next !== cur) { writeText(capPath, next); did(`${cur ? "update" : "write"} ${path.relative(home, capPath)}: ${label}`); } else note(`captain.md ${label} up to date`);
+    };
     if (!flag("no-branch-policy")) {
       const base = opt("base-branch", fm.baseBranch);
-      const policy = fs.readFileSync(path.join(here, fm.captainPolicy), "utf8").replace(/__BASE__/g, base).trim() + "\n";
-      const capPath = path.join(fmDir, "data", "captain.md");
-      const cur = fs.existsSync(capPath) ? fs.readFileSync(capPath, "utf8") : "";
-      const block = /<!-- HABLO:BRANCH-POLICY:START -->[\s\S]*?<!-- HABLO:BRANCH-POLICY:END -->\n?/;
-      const next = block.test(cur) ? cur.replace(block, policy) : (cur ? cur.replace(/\s*$/, "\n\n") : "# Captain preferences\n\n") + policy;
-      if (next !== cur) { writeText(capPath, next); did(`${cur ? "update" : "write"} ${path.relative(home, capPath)}: branch-per-Jira-ticket policy (integration branch ${base})`); } else note("captain.md branch policy up to date");
+      captainBlock("BRANCH-POLICY", fs.readFileSync(path.join(here, fm.captainPolicy), "utf8").replace(/__BASE__/g, base).trim() + "\n", `branch-per-Jira-ticket policy (integration branch ${base})`);
     }
+    // OpenWiki: pi-openwiki-adapter is a global Pi package, so every crewmate has the tools; the policy makes the
+    // captain scout with the wiki, put wiki-first instructions in every brief, and keep the wiki updated.
+    if (!flag("no-openwiki-policy")) captainBlock("OPENWIKI-POLICY", fs.readFileSync(path.join(here, fm.openwikiPolicy), "utf8").trim() + "\n", "OpenWiki-first policy");
   }
 }
 
