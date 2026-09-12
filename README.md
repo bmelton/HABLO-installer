@@ -81,6 +81,26 @@ Out of the box firstmate cuts each crewmate's worktree at the default branch, ha
 
 This works through firstmate's own instruction path rather than a script patch, so `git pull` keeps working. Its limits are honest ones: it relies on the orchestrator following the preference (firstmate is built around exactly that, but a human still reviews the PR base before merging), and `fm-fleet-sync` keeps refreshing the *default* branch in project clones, which is fine because worktrees reset to the ticket branch explicitly. Edit the policy file in this repo to change the wording; re-running the installer replaces the block.
 
+### What the installer changes in firstmate, and how to undo it
+
+Nothing tracked by firstmate's git repository is ever modified; `git status` inside the clone stays clean, which is what keeps `git pull --ff-only` working. The installer writes only these local, gitignored files, all of which firstmate itself designates as per-installation configuration:
+
+| File | Written when | Effect of deleting it |
+| --- | --- | --- |
+| `config/crew-harness` | always (`pi`) | firstmate detects the crew harness itself |
+| `config/crew-dispatch.json` | always, unless a file not written by this installer is already there | dispatch falls back to `config/crew-harness`; crewmates use Pi's default model |
+| `config/backend` | only with `--backend` | firstmate auto-detects the backend (tmux) |
+| `data/captain.md` | unless `--no-branch-policy`; created if absent, otherwise the marked block is appended and the rest of the file is left byte-for-byte | remove the `<!-- HABLO:BRANCH-POLICY:START -->` … `END -->` block (or the file, if the installer created it) to drop the policy |
+
+Full undo:
+
+```sh
+cd ~/firstmate
+rm -f config/crew-harness config/crew-dispatch.json config/backend
+# then delete data/captain.md if the installer created it, or cut the HABLO block out of it
+git status        # still clean: nothing tracked was touched
+```
+
 ## What it deliberately does not do
 
 It does not manage `~/.aws/config` beyond running the AWS CLI's own wizard, does not store credentials anywhere, does not install OpenWiki (Node 22 and a provider choice are yours), and does not touch projects: OpenWiki wikis and `.pi/openwiki.json` are per repository.
