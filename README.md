@@ -32,7 +32,7 @@ Then: `pi --provider bedrouter --model auto` (or `auto-oss` with `--ladder oss`)
 | --- | --- |
 | `--profile <name>` | AWS profile for bedrouter (`AWS_PROFILE` in `~/.bedrouter/.env`). Any SSO profile works; the name is whatever `aws configure sso` produced |
 | `--ladder claude \| oss` | Which family `auto` should point at (`claude` default). Both ladders are installed; this picks the auto-selected model and the model notes' default |
-| `--install-pi` | Install the Pi CLI globally if `pi` is not on PATH; a no-op when it is. `--pi-manager npm\|bun\|pnpm` picks the tool (default: bun if present, else pnpm, else npm) |
+| `--install-pi` | Install the Pi CLI globally if `pi` is not on PATH; a no-op when it is. `--pi-manager npm\|bun\|pnpm` picks the tool (default: npm if present, else bun, else pnpm). If the manager's global bin dir is not on PATH, the installer still finds `pi` there for the rest of the run and prints the `export PATH=…` line to add to your shell rc |
 | `--restore <tgz>` | Step 0: restore a `backup` archive (see below) |
 | `--force-restore` | Let the restore overwrite files that already exist |
 | `--default-model` | Make `bedrouter/auto` Pi's default model, not just the auto-selected one |

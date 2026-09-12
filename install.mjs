@@ -103,8 +103,8 @@ note(`node ${process.versions.node}${nodeMajor < manifest.openwiki.minNode ? `  
 let piBin = which("pi");
 const cliPkg = manifest.pi.cliPackage;
 if (!piBin && flag("install-pi")) {
-  // pick the global package manager: explicit flag, else whichever is on PATH (bun first: faster, same result)
-  const mgr = opt("pi-manager", ["bun", "pnpm", "npm"].find((m) => which(m)) ?? "npm");
+  // npm first: on Homebrew/nvm setups its global bin dir is already on PATH. bun/pnpm work too but usually need a PATH line.
+  const mgr = opt("pi-manager", ["npm", "bun", "pnpm"].find((m) => which(m)) ?? "npm");
   const cmd = { npm: ["npm", ["install", "-g", cliPkg]], bun: ["bun", ["add", "-g", cliPkg]], pnpm: ["pnpm", ["add", "-g", cliPkg]] }[mgr];
   if (!cmd) fail(`--pi-manager must be npm, bun or pnpm (got ${mgr})`);
   did(`${cmd[0]} ${cmd[1].join(" ")}`);
@@ -112,7 +112,18 @@ if (!piBin && flag("install-pi")) {
     const r = run(cmd[0], cmd[1], { inherit: true, timeout: 600_000 });
     if (r.status !== 0) fail(`${cmd[0]} could not install ${cliPkg} (exit ${r.status}); on EACCES use a user-level global prefix (nvm, or \`npm config set prefix ~/.npm-global\`)`);
     piBin = which("pi");
-    if (!piBin) fail(`${cliPkg} installed but \`pi\` is not on PATH; open a new shell or add your global bin directory to PATH, then re-run`);
+    if (!piBin) {
+      // not on PATH yet: ask the manager where its global bin is, use it for this run, and say what to add permanently
+      const binDir = mgr === "bun" ? (run("bun", ["pm", "bin", "-g"]).stdout?.trim() || path.join(home, ".bun", "bin"))
+        : mgr === "pnpm" ? (run("pnpm", ["bin", "-g"]).stdout?.trim() || "")
+        : path.join(run("npm", ["prefix", "-g"]).stdout?.trim() || "", "bin");
+      const candidate = binDir && path.join(binDir, "pi");
+      if (candidate && fs.existsSync(candidate)) {
+        process.env.PATH = `${binDir}${path.delimiter}${process.env.PATH}`;
+        piBin = candidate;
+        note(`pi installed to ${binDir}, which is not on your PATH. Using it for this run; add this to your shell rc:\n         export PATH="${binDir}:$PATH"`);
+      } else fail(`${cliPkg} installed but \`pi\` is not on PATH; open a new shell or add your global bin directory to PATH, then re-run`);
+    }
   }
 }
 if (!piBin && !DRY) fail(`pi is not installed. Re-run with --install-pi, or install it yourself:  npm install -g ${cliPkg}`);
