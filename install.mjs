@@ -5,7 +5,8 @@
 //   node install.mjs backup [--to <dir>] [--with-history]   archive auth + trust (+ config; + sessions/caches/logs with the flag)
 //   node install.mjs --profile <aws-profile> [--restore <tgz>] [--ladder claude|oss] [--dry-run] [--optional] [--default-model]
 //                    [--skip-aws] [--skip-probe] [--skip-agents] [--force-agents] [--home <dir>]
-//                    [--skip-firstmate] [--firstmate-dir <dir>] [--backend tmux|herdr] [--no-branch-policy]
+//                    [--skip-firstmate] [--firstmate-dir <dir>] [--backend tmux|herdr] [--no-branch-policy] [--base-branch <name>]
+//                    [--skip-cli] [--bin-dir <dir>]   the `hablo` command (default ~/.local/bin) and its Pi extension (~/.hablo)
 //                    [--install-pi] [--pi-manager npm|bun|pnpm]   install the Pi CLI itself when it is missing
 //
 // Steps (each prints what it did or would do):
@@ -19,7 +20,9 @@
 //   7 agents      agent profiles + workflows into ~/.pi (never overwrites without --force-agents)
 //   8 fit notes   pi-agents model notes into ~/.pi/agent/workflows.json
 //   9 firstmate   clone/update kunchenguid/firstmate; crew harness = pi; crew-dispatch.json routing every crewmate
-//                 through bedrouter; captain.md branch-per-Jira-ticket policy; optional config/backend (--backend herdr)
+//                 through bedrouter; captain.md branch-per-Jira-ticket policy (integration branch from the manifest,
+//                 default develop); optional config/backend (--backend herdr)
+//  10 cli         `hablo`: launch a firstmate captain from any project directory (wrapper + ~/.hablo/hablo-captain.ts)
 import { execFileSync, spawnSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
@@ -369,17 +372,43 @@ else {
     }
     // Branch policy: a standing captain preference (data/captain.md is firstmate's canonical, gitignored policy file).
     if (!flag("no-branch-policy")) {
-      const policy = fs.readFileSync(path.join(here, fm.captainPolicy), "utf8").trim() + "\n";
+      const base = opt("base-branch", fm.baseBranch);
+      const policy = fs.readFileSync(path.join(here, fm.captainPolicy), "utf8").replace(/__BASE__/g, base).trim() + "\n";
       const capPath = path.join(fmDir, "data", "captain.md");
       const cur = fs.existsSync(capPath) ? fs.readFileSync(capPath, "utf8") : "";
       const block = /<!-- HABLO:BRANCH-POLICY:START -->[\s\S]*?<!-- HABLO:BRANCH-POLICY:END -->\n?/;
       const next = block.test(cur) ? cur.replace(block, policy) : (cur ? cur.replace(/\s*$/, "\n\n") : "# Captain preferences\n\n") + policy;
-      if (next !== cur) { writeText(capPath, next); did(`${cur ? "update" : "write"} ${path.relative(home, capPath)}: branch-per-Jira-ticket policy`); } else note("captain.md branch policy up to date");
+      if (next !== cur) { writeText(capPath, next); did(`${cur ? "update" : "write"} ${path.relative(home, capPath)}: branch-per-Jira-ticket policy (integration branch ${base})`); } else note("captain.md branch policy up to date");
     }
   }
 }
 
+// ---- 10 cli ---------------------------------------------------------------------------------------------------------------
+step(10, "hablo command (firstmate from any project directory)");
+const cli = manifest.cli;
+const binDir = expand(opt("bin-dir", cli.binDir));
+const habloHome = expand(cli.home);
+if (flag("skip-cli") || flag("skip-firstmate")) note(`skipped (${flag("skip-cli") ? "--skip-cli" : "--skip-firstmate: the wrapper needs the firstmate checkout"})`);
+else {
+  // Copied, not symlinked: the wrapper must keep working if this installer checkout moves or goes away. The firstmate
+  // location is stamped in; FM_ROOT / FM_HOME in the environment still override it.
+  const installFile = (src, dst, transform, mode) => {
+    const next = transform(fs.readFileSync(src, "utf8"));
+    const cur = fs.existsSync(dst) ? fs.readFileSync(dst, "utf8") : null;
+    if (cur === next) { note(`${path.relative(home, dst)} up to date`); return; }
+    if (cur !== null && !/HABLO-installer/.test(cur)) { note(`${path.relative(home, dst)} exists and was not written by this installer; leaving it`); return; }
+    writeText(dst, next);
+    if (!DRY) fs.chmodSync(dst, mode);
+    did(`${cur === null ? "install" : "update"} ${path.relative(home, dst)}`);
+  };
+  installFile(path.join(here, "bin", "hablo"), path.join(binDir, "hablo"), (t) => t.replace(/__FM_ROOT__/g, fmDir).replace(/__HABLO_HOME__/g, habloHome), 0o755);
+  installFile(path.join(here, "pi", "extensions", "hablo-captain.ts"), path.join(habloHome, "hablo-captain.ts"), (t) => t, 0o644);
+  const onPath = (process.env.PATH ?? "").split(path.delimiter).some((d) => d && path.resolve(expand(d)) === path.resolve(binDir));
+  if (!onPath) note(`${binDir} is not on your PATH; add this to your shell rc:\n         export PATH="${binDir.replace(home, "$HOME")}:$PATH"`);
+  for (const ext of ["fm-primary-turnend-guard.ts", "fm-primary-pi-watch.ts"]) if (fs.existsSync(fmDir) && !fs.existsSync(path.join(fmDir, ".pi", "extensions", ext))) note(`firstmate has no .pi/extensions/${ext} (upstream layout changed?); hablo skips missing extensions but the captain may lack supervision`);
+}
+
 // ---- done ---------------------------------------------------------------------------------------------------------------
 log(`\nDone${DRY ? " (dry run; nothing written)" : ""}.`);
-log(`Next:\n  pi --provider bedrouter --model ${ladder.autoSelect}\n  /bedrouter status      /bedrouter probe      /bedrouter report\n  in a repo with a wiki: /openwiki doctor${flag("skip-firstmate") ? "" : `\n  firstmate: cd ${fmDir} && pi --provider bedrouter --model ${ladder.autoSelect}       (then: ahoy!)`}`);
+log(`Next:\n  pi --provider bedrouter --model ${ladder.autoSelect}\n  /bedrouter status      /bedrouter probe      /bedrouter report\n  in a repo with a wiki: /openwiki doctor${flag("skip-firstmate") ? "" : `\n  firstmate: cd <your project> && hablo       (then: ahoy!)   -  or cd ${fmDir} && pi`}`);
 if (!profile) log(`  (set AWS_PROFILE in ${envPath}, then: aws sso login --profile <name>)`);

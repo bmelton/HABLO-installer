@@ -1,0 +1,70 @@
+#!/usr/bin/env bash
+# hablo: start a firstmate captain for the project in the current directory.
+# managed by HABLO-installer (bin/hablo in that repo is the source; re-running the installer refreshes this copy).
+#
+#   cd ~/code/myproject && hablo [pi options...]
+#
+# firstmate normally wants to be launched from its own checkout, because the harness discovers AGENTS.md and
+# .pi/extensions from the working directory. This wrapper keeps firstmate's code and home where they are and points
+# them at the project you are standing in:
+#   FM_ROOT_OVERRIDE / FM_HOME  -> the firstmate checkout (scripts, state/, data/, config/, projects/)
+#   PATH                        -> +$FM_ROOT/bin, so the relative `bin/fm-*.sh` calls in AGENTS.md resolve
+#   data/projects.md            -> gets a registry line for this project (once)
+#   projects/<name>             -> a symlink to this directory, so scripts that expect projects/<name> keep working
+#   pi -e ...                   -> firstmate's tracked Pi extensions plus hablo-captain.ts, which injects AGENTS.md
+#                                  (with absolute bin/ paths) into the system prompt
+# Bash 3.2 compatible (macOS); works on Linux and WSL. Nothing here needs root.
+set -eu
+
+FM_ROOT="${FM_ROOT:-__FM_ROOT__}"
+HABLO_HOME="${HABLO_HOME:-__HABLO_HOME__}"
+MODE="${HABLO_PROJECT_MODE:-direct-PR}"
+
+usage() {
+  sed -n '2,20p' "$0" | sed 's/^# \{0,1\}//'
+  echo
+  echo "env: FM_ROOT (firstmate checkout), FM_HOME (firstmate home, default FM_ROOT), HABLO_PROJECT_MODE (default direct-PR)"
+}
+case "${1:-}" in -h|--help|help) usage; exit 0;; esac
+
+[ -d "$FM_ROOT/bin" ] || { echo "hablo: firstmate checkout not found at $FM_ROOT (run the HABLO installer, or set FM_ROOT)" >&2; exit 1; }
+[ -f "$HABLO_HOME/hablo-captain.ts" ] || { echo "hablo: $HABLO_HOME/hablo-captain.ts missing (re-run the HABLO installer)" >&2; exit 1; }
+command -v pi >/dev/null 2>&1 || { echo "hablo: pi is not on PATH" >&2; exit 1; }
+
+proj="$(pwd -P)"
+root_real="$(cd "$FM_ROOT" && pwd -P)"
+export FM_ROOT_OVERRIDE="$root_real"
+export FM_HOME="${FM_HOME:-$root_real}"
+export PATH="$root_real/bin:$PATH"
+
+# Standing in the firstmate checkout itself: plain firstmate, its own discovery does the rest.
+if [ "$proj" = "$root_real" ]; then exec pi "$@"; fi
+
+git -C "$proj" rev-parse --show-toplevel >/dev/null 2>&1 || { echo "hablo: $proj is not a git repository; firstmate works on git projects (worktrees, branches, PRs)" >&2; exit 1; }
+top="$(git -C "$proj" rev-parse --show-toplevel)"
+if [ "$top" != "$proj" ]; then echo "hablo: using the repository root $top" >&2; proj="$top"; cd "$proj"; fi
+name="$(basename "$proj")"
+
+mkdir -p "$FM_HOME/data" "$FM_HOME/projects"
+reg="$FM_HOME/data/projects.md"
+if ! grep -q "^- $name \(\[\| -\)" "$reg" 2>/dev/null; then
+  [ -s "$reg" ] || printf '# Projects\n\n' > "$reg"
+  printf -- '- %s [%s] - %s (added %s, via hablo)\n' "$name" "$MODE" "$proj" "$(date +%Y-%m-%d)" >> "$reg"
+  echo "hablo: registered $name [$MODE] in $reg" >&2
+fi
+link="$FM_HOME/projects/$name"
+if [ -L "$link" ]; then
+  [ "$(cd "$link" 2>/dev/null && pwd -P)" = "$proj" ] || ln -sfn "$proj" "$link"
+elif [ -e "$link" ]; then
+  echo "hablo: $link exists and is not a symlink (a firstmate-managed clone?); pick another directory name or remove it" >&2; exit 1
+else
+  ln -s "$proj" "$link"
+fi
+
+export HABLO_PROJECT="$proj" HABLO_PROJECT_NAME="$name"
+ext="$root_real/.pi/extensions"
+set -- -e "$HABLO_HOME/hablo-captain.ts" "$@"
+for f in fm-primary-turnend-guard.ts fm-primary-pi-watch.ts fm-branch-supervision.ts fm-calm.ts; do
+  [ -f "$ext/$f" ] && set -- -e "$ext/$f" "$@"
+done
+exec pi "$@"

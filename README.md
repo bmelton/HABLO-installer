@@ -24,7 +24,9 @@ Idempotent: run it again any time; it only changes what differs and never overwr
 | 8 | Merges pi-agents model notes so the planner defaults to `bedrouter/auto` and pins premium rungs only for planning/review | `~/.pi/agent/workflows.json` |
 | 9 | Clones (or fast-forwards) [kunchenguid/firstmate](https://github.com/kunchenguid/firstmate); crew harness `pi`; `config/crew-dispatch.json` routing every crewmate through bedrouter; the branch-per-Jira-ticket policy in `data/captain.md`; optional `config/backend`; checks for git, gh (authenticated), tmux, jq | `~/firstmate` (`--firstmate-dir`) |
 
-Then: `pi --provider bedrouter --model auto` (or `auto-oss` with `--ladder oss`). For firstmate: `cd ~/firstmate && pi` — its `AGENTS.md` takes over the session, and it spawns crewmates as plain `pi` processes in tmux. Those crewmates use Pi's **default** model, so pass `--default-model` to the installer if you want every crewmate routed through bedrouter (the footer, log and report then cover the whole crew). pi-bedrouter starts the server on first use, shows what served each request in the footer, and `/bedrouter status|probe|report`, `/openwiki doctor` work from inside Pi.
+| 10 | Installs the `hablo` command and its Pi extension, so a firstmate captain can be started from any project directory (see [hablo](#hablo-firstmate-from-any-project-directory)) | `~/.local/bin/hablo` (`--bin-dir`), `~/.hablo/` |
+
+Then: `pi --provider bedrouter --model auto` (or `auto-oss` with `--ladder oss`). For firstmate: `cd <your project> && hablo` (or `cd ~/firstmate && pi`) — firstmate's `AGENTS.md` takes over the session, and it spawns crewmates as `pi --model bedrouter/auto` processes in tmux, routed explicitly by the dispatch file the installer writes. pi-bedrouter starts the server on first use, shows what served each request in the footer, and `/bedrouter status|probe|report`, `/openwiki doctor` work from inside Pi.
 
 ## Options
 
@@ -41,6 +43,8 @@ Then: `pi --provider bedrouter --model auto` (or `auto-oss` with `--ladder oss`)
 | `--firstmate-dir <dir>` | Where to clone firstmate (default `~/firstmate`) |
 | `--backend tmux \| herdr` | Write firstmate's `config/backend` (default: leave auto-detection, which is tmux) |
 | `--no-branch-policy` | Don't write the Jira-branch policy into firstmate's `data/captain.md` |
+| `--base-branch <name>` | Integration branch for the Jira-branch policy (default `develop` from the manifest) |
+| `--skip-cli` `--bin-dir <dir>` | Skip the `hablo` command, or install it somewhere other than `~/.local/bin` |
 | `--force-agents` | Overwrite existing agent profiles / workflows with the bundled ones |
 | `--dry-run` | Print, don't write |
 
@@ -151,8 +155,9 @@ If a `config/crew-dispatch.json` already exists that this installer did not writ
 
 ### Feature branches named after the Jira ticket
 
-Out of the box firstmate cuts each crewmate's worktree at the default branch, has it work on `fm/<id>`, and in `direct-PR` mode the crewmate opens the PR itself with `gh`, whose default base is the repository's default branch. There is no base-branch setting to flip. What firstmate does have is `data/captain.md`, its canonical, always-loaded file of captain preferences, which the orchestrator reads before every dispatch. The installer writes a marked block into it (`firstmate/captain-branch-policy.md`, idempotent, never touching anything else in the file) that establishes the policy:
+Out of the box firstmate cuts each crewmate's worktree at the default branch, has it work on `fm/<id>`, and in `direct-PR` mode the crewmate opens the PR itself with `gh`, whose default base is the repository's default branch. There is no base-branch setting to flip: none of firstmate's scripts pass `--base`, and `fm-spawn.sh` re-resolves `origin/HEAD` from the remote before every spawn, so the only script-free ways to change where work lands are the forge's default branch (`gh repo edit --default-branch develop`) or the captain's standing instructions, which is what the installer uses. What firstmate does have is `data/captain.md`, its canonical, always-loaded file of captain preferences, which the orchestrator reads before every dispatch. The installer writes a marked block into it (`firstmate/captain-branch-policy.md`, idempotent, never touching anything else in the file) that establishes the policy:
 
+- the integration branch is `develop` (`firstmate.baseBranch` in the manifest, `--base-branch` to override): ticket branches are cut from `origin/develop` and merged back into it, and the default branch is never targeted;
 - every task must name a Jira key; firstmate asks for it rather than guessing;
 - the integration branch is `origin/<JIRA-KEY>`, created from the default branch if missing;
 - each crewmate is instructed to `git fetch origin <JIRA-KEY> && git reset --hard origin/<JIRA-KEY>` right after creating `fm/<id>`, to prefix commits and the PR title with the key, and to open the PR with `--base <JIRA-KEY>`;
@@ -160,6 +165,19 @@ Out of the box firstmate cuts each crewmate's worktree at the default branch, ha
 - `local-only` delivery (merge into local `main`) is disallowed under the policy.
 
 This works through firstmate's own instruction path rather than a script patch, so `git pull` keeps working. Its limits are honest ones: it relies on the orchestrator following the preference (firstmate is built around exactly that, but a human still reviews the PR base before merging), and `fm-fleet-sync` keeps refreshing the *default* branch in project clones, which is fine because worktrees reset to the ticket branch explicitly. Edit the policy file in this repo to change the wording; re-running the installer replaces the block.
+
+## hablo: firstmate from any project directory
+
+firstmate wants to be launched inside its own checkout, because the harness discovers `AGENTS.md` and the tracked `.pi/extensions/*.ts` from the working directory. Its scripts do not care: every `bin/fm-*.sh` resolves its own location, and `state/`, `data/`, `config/` and `projects/` hang off `FM_HOME`, which the remote and secondmate paths already relocate with `FM_HOME` + `FM_ROOT_OVERRIDE`. `fm-spawn.sh` also accepts a project as an absolute path, not only `projects/<name>`. So the installer adds a wrapper that supplies the harness-side pieces without forking firstmate:
+
+```sh
+cd ~/code/myproject
+hablo            # any extra arguments go to pi, e.g. hablo --model bedrouter/opus
+```
+
+`hablo` (`bin/hablo` here, copied to `~/.local/bin/hablo` with the firstmate directory stamped in) exports `FM_ROOT_OVERRIDE` and `FM_HOME` pointing at the firstmate checkout, prepends `<firstmate>/bin` to `PATH`, registers the project once in `data/projects.md` (mode `direct-PR`, or `HABLO_PROJECT_MODE`), symlinks `projects/<name>` to the directory so scripts that expect that spelling keep working, and starts Pi in the project with firstmate's four Pi extensions plus `~/.hablo/hablo-captain.ts` passed as `-e`. That extension appends firstmate's `AGENTS.md` to the system prompt on every turn, with the 58 relative `bin/fm-*.sh` invocations rewritten to absolute paths, and tells the captain which project the session is about. Run from inside the firstmate checkout, `hablo` is just `pi`. It needs bash 3.2+ (macOS's), `git`, and `pi` on `PATH`; it works the same on macOS, Linux and WSL and never needs root, which is why it lives in `~/.local/bin` rather than `/usr/local/bin` (the installer prints the `PATH` line if that directory is not on it).
+
+Undo: `rm ~/.local/bin/hablo ~/.hablo/hablo-captain.ts`. The registry lines it added to `data/projects.md` and the `projects/<name>` symlinks are runtime artifacts; prune them by hand when a project is retired.
 
 ### What the installer changes in firstmate, and how to undo it
 
