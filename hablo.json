@@ -1,5 +1,10 @@
 {
   "$comment": "HABLO machine manifest: what `install.mjs` puts in place. Edit here, not in the script.",
+  "defaults": {
+    "$comment": "What a bare `./install.sh` assumes. --profile / --ladder on the command line win; AWS_PROFILE in the environment wins over defaults.profile.",
+    "profile": "bedrouter",
+    "ladder": "oss"
+  },
   "pi": {
     "packages": [
       "npm:pi-agents",

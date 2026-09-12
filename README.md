@@ -4,7 +4,7 @@ One command that takes a machine with Node and Pi on it to the HABLO setup: Pi p
 
 ```sh
 git clone <this repo> && cd HABLO-installer
-./install.sh --install-pi --profile <aws-sso-profile>            # e.g. --profile <username>
+./install.sh --install-pi            # assumes --profile bedrouter --ladder oss (hablo.json "defaults"); pass either to change
 ```
 
 Idempotent: run it again any time; it only changes what differs and never overwrites your agent profiles unless told to. `--dry-run` prints the plan without writing anything.
@@ -27,14 +27,14 @@ Idempotent: run it again any time; it only changes what differs and never overwr
 | 10 | Installs the `hablo` command and its Pi extension, so a firstmate captain can be started from any project directory (see [hablo](#hablo-firstmate-from-any-project-directory)) | `~/.local/bin/hablo` (`--bin-dir`), `~/.hablo/` |
 | 11 | Installs the tools firstmate's bootstrap otherwise reports as `MISSING`: `gh-axi`, `chrome-devtools-axi`, `lavish-axi`, `tasks-axi`, `quota-axi` (`npm install -g`), and `treehouse`, `no-mistakes` (their own install scripts, into `~/.local/bin`, no sudo). Only what is absent; `--update-tools` reinstalls everything | npm's global prefix, `~/.local/bin`, `~/.no-mistakes/` |
 
-Then: `pi --provider bedrouter --model auto` (or `auto-oss` with `--ladder oss`). For firstmate: `cd <your project> && hablo` (or `cd ~/firstmate && pi`) — firstmate's `AGENTS.md` takes over the session, and it spawns crewmates as `pi --model bedrouter/auto` processes in tmux, routed explicitly by the dispatch file the installer writes. pi-bedrouter starts the server on first use, shows what served each request in the footer, and `/bedrouter status|probe|report`, `/openwiki doctor` work from inside Pi.
+Then: `pi --provider bedrouter --model auto-oss` (or `auto` with `--ladder claude`). For firstmate: `cd <your project> && hablo` (or `cd ~/firstmate && pi`) — firstmate's `AGENTS.md` takes over the session, and it spawns crewmates as `pi --model bedrouter/auto` processes in tmux, routed explicitly by the dispatch file the installer writes. pi-bedrouter starts the server on first use, shows what served each request in the footer, and `/bedrouter status|probe|report`, `/openwiki doctor` work from inside Pi.
 
 ## Options
 
 | Flag | Meaning |
 | --- | --- |
-| `--profile <name>` | AWS profile for bedrouter (`AWS_PROFILE` in `~/.bedrouter/.env`). Any SSO profile works; the name is whatever `aws configure sso` produced |
-| `--ladder claude \| oss` | Which family `auto` should point at (`claude` default). Both ladders are installed; this picks the auto-selected model and the model notes' default |
+| `--profile <name>` | AWS profile for bedrouter (`AWS_PROFILE` in `~/.bedrouter/.env`). Default `bedrouter` (`defaults.profile` in the manifest; `AWS_PROFILE` in the environment wins over that). Any SSO profile works; the name is whatever `aws configure sso` produced |
+| `--ladder claude \| oss` | Which family `auto` should point at (default `oss`, from `defaults.ladder` in the manifest). Both ladders are installed; this picks the auto-selected model and the model notes' default |
 | `--install-pi` | Install the Pi CLI globally if `pi` is not on PATH; a no-op when it is. `--pi-manager npm\|bun\|pnpm` picks the tool (default: npm if present, else bun, else pnpm). If the manager's global bin dir is not on PATH, the installer still finds `pi` there for the rest of the run and prints the `export PATH=…` line to add to your shell rc |
 | `--restore <tgz>` | Step 0: restore a `backup` archive (see below) |
 | `--force-restore` | Let the restore overwrite files that already exist |
@@ -74,11 +74,11 @@ npm install -g @earendil-works/pi-coding-agent
 cd ~/.dotfiles && stow -R pi
 
 # 5. rebuild everything, restoring auth and trust
-cd ~/projects/ai/HABLO-installer && ./install.sh --install-pi --profile <aws-profile> --restore ~/hablo-backup-<timestamp>.tgz
+cd ~/projects/ai/HABLO-installer && ./install.sh --install-pi --restore ~/hablo-backup-<timestamp>.tgz
 
 # 6. verify, then clean up
 pi --list-models | grep -c bedrouter       # 7
-./install.sh --profile <aws-profile> --dry-run   # every line should read "already installed / present / up to date"
+./install.sh --dry-run   # every line should read "already installed / present / up to date"
 rm -rf ~/.pi.old-*                         # when satisfied
 ```
 
@@ -125,7 +125,7 @@ sso_role_name = BedrockInvoke
 region = us-east-1
 ```
 
-**If you skip this.** With `--profile` naming a profile that does not exist, step 5 runs `aws configure sso --profile <name>` for you (interactive, same questions as above); without `--profile` at all, the AWS and probe steps are skipped and `~/.bedrouter/.env` is written with a commented-out `AWS_PROFILE` for you to fill in. Static keys (`AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY`) or a Bedrock API key (`AWS_BEARER_TOKEN_BEDROCK`) in `~/.bedrouter/.env` work too; the installer never stores credentials itself.
+**If you skip this.** With `--profile` naming a profile that does not exist, step 5 runs `aws configure sso --profile <name>` for you (interactive, same questions as above); with `--profile ""` (or an empty `defaults.profile`), the AWS and probe steps are skipped and `~/.bedrouter/.env` is written with a commented-out `AWS_PROFILE` for you to fill in. Static keys (`AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY`) or a Bedrock API key (`AWS_BEARER_TOKEN_BEDROCK`) in `~/.bedrouter/.env` work too; the installer never stores credentials itself.
 
 ## Prerequisites
 
@@ -174,7 +174,7 @@ firstmate wants to be launched inside its own checkout, because the harness disc
 
 ```sh
 cd ~/code/myproject
-hablo            # = pi --provider bedrouter --model auto (or auto-oss with --ladder oss / --cli-model auto-oss)
+hablo            # = pi --provider bedrouter --model auto-oss (the ladder's auto alias; --cli-model to change only this)
 hablo --model bedrouter/opus     # your own --provider/--model win; HABLO_PROVIDER / HABLO_MODEL work too
 ```
 

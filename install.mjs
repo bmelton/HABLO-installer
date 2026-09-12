@@ -3,7 +3,8 @@
 // Zero dependencies. Node 20+ to run; Node 22+ is required for OpenWiki itself (checked, not enforced).
 //
 //   node install.mjs backup [--to <dir>] [--with-history]   archive auth + trust (+ config; + sessions/caches/logs with the flag)
-//   node install.mjs --profile <aws-profile> [--restore <tgz>] [--ladder claude|oss] [--dry-run] [--optional] [--default-model]
+//   node install.mjs [--profile <aws-profile>] [--ladder claude|oss] [--restore <tgz>] [--dry-run] [--optional] [--default-model]
+//                    (profile and ladder default to hablo.json "defaults": bedrouter / oss; AWS_PROFILE in the env also counts)
 //                    [--skip-aws] [--skip-probe] [--skip-agents] [--force-agents] [--home <dir>]
 //                    [--skip-firstmate] [--firstmate-dir <dir>] [--backend tmux|herdr] [--no-branch-policy] [--base-branch <name>]
 //                    [--skip-cli] [--bin-dir <dir>] [--cli-model <m>]   the `hablo` command (default ~/.local/bin) and its Pi extension
@@ -36,17 +37,18 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 const manifest = JSON.parse(fs.readFileSync(path.join(here, "hablo.json"), "utf8"));
 const args = process.argv.slice(2);
 const flag = (n) => args.includes(`--${n}`);
-const opt = (n, d) => { const i = args.indexOf(`--${n}`); return i >= 0 && args[i + 1] && !args[i + 1].startsWith("--") ? args[i + 1] : d; };
+const opt = (n, d) => { const i = args.indexOf(`--${n}`); return i >= 0 && args[i + 1] !== undefined && !args[i + 1].startsWith("--") ? args[i + 1] : d; };
 const DRY = flag("dry-run");
 const home = os.homedir();
 const expand = (p) => p.replace(/^~(?=$|\/)/, home);
 const agentDir = process.env.PI_CODING_AGENT_DIR ?? path.join(home, ".pi", "agent");
 const piDir = path.dirname(agentDir);
 const brHome = expand(opt("home", manifest.bedrouter.home));
-const ladderName = opt("ladder", "claude");
+const defaults = manifest.defaults ?? {};
+const ladderName = opt("ladder", defaults.ladder ?? "claude");
 const ladder = manifest.bedrouter.ladders[ladderName];
 if (!ladder) fail(`unknown --ladder ${ladderName}; choose one of ${Object.keys(manifest.bedrouter.ladders).join(", ")}`);
-const profile = opt("profile", process.env.AWS_PROFILE ?? "");
+const profile = opt("profile", process.env.AWS_PROFILE ?? defaults.profile ?? "");
 const stamp = () => new Date().toISOString().replace(/[:T]/g, "-").slice(0, 16);
 
 const log = (s) => console.log(s);
