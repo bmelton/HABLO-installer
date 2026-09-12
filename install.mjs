@@ -2,11 +2,13 @@
 // HABLO installer: configures Pi + bedrouter + OpenWiki on a machine, idempotently, from hablo.json.
 // Zero dependencies. Node 20+ to run; Node 22+ is required for OpenWiki itself (checked, not enforced).
 //
-//   node install.mjs --profile <aws-profile> [--ladder claude|oss] [--dry-run] [--optional] [--default-model]
+//   node install.mjs backup [--to <dir>] [--with-history]   archive auth + trust (+ config; + sessions/caches/logs with the flag)
+//   node install.mjs --profile <aws-profile> [--restore <tgz>] [--ladder claude|oss] [--dry-run] [--optional] [--default-model]
 //                    [--skip-aws] [--skip-probe] [--skip-agents] [--force-agents] [--home <dir>]
 //                    [--skip-firstmate] [--firstmate-dir <dir>] [--backend tmux|herdr] [--no-branch-policy]
 //
 // Steps (each prints what it did or would do):
+//   0 restore     with --restore <tgz>: put personal state back (never overwrites an existing file unless --force-restore)
 //   1 preflight   node, pi, aws, git; openwiki (advisory)
 //   2 packages    pi install npm:<pkg> for anything not yet in settings.json packages
 //   3 settings    enabledModels += bedrouter/*; a few UX settings; optional default model
@@ -38,6 +40,7 @@ const ladderName = opt("ladder", "claude");
 const ladder = manifest.bedrouter.ladders[ladderName];
 if (!ladder) fail(`unknown --ladder ${ladderName}; choose one of ${Object.keys(manifest.bedrouter.ladders).join(", ")}`);
 const profile = opt("profile", process.env.AWS_PROFILE ?? "");
+const stamp = () => new Date().toISOString().replace(/[:T]/g, "-").slice(0, 16);
 
 const log = (s) => console.log(s);
 const step = (n, title) => log(`\n[${n}] ${title}`);
@@ -50,6 +53,47 @@ function writeText(p, text) { if (DRY) return; fs.mkdirSync(path.dirname(p), { r
 const which = (cmd) => { const r = spawnSync(process.platform === "win32" ? "where" : "which", [cmd], { encoding: "utf8" }); return r.status === 0 ? r.stdout.trim().split("\n")[0] : undefined; };
 const run = (cmd, a, o = {}) => spawnSync(cmd, a, { encoding: "utf8", stdio: o.inherit ? "inherit" : "pipe", cwd: o.cwd, env: { ...process.env, ...o.env }, timeout: o.timeout ?? 300_000 });
 const semverGte = (v, min) => Number(String(v).replace(/^v/, "").split(".")[0]) >= min;
+
+// ---- backup subcommand ------------------------------------------------------------------------------------------------
+if (args[0] === "backup") {
+  const to = expand(opt("to", "~"));
+  const out = path.join(to, `hablo-backup-${stamp()}.tgz`);
+  const sets = [...manifest.backup.essentials, ...manifest.backup.config, ...(flag("with-history") ? manifest.backup.history : [])];
+  const rel = sets.filter((p) => fs.existsSync(path.join(home, p)));
+  if (!rel.length) fail("nothing to back up under ~/.pi or ~/.bedrouter");
+  // -h follows symlinks (settings.json etc. point into dotfiles) so the archive holds real content, not links
+  const r = spawnSync("tar", ["-czhf", out, "-C", home, ...rel], { encoding: "utf8" });
+  if (r.status !== 0) fail(`tar failed: ${r.stderr}`);
+  const size = fs.statSync(out).size;
+  log(`backed up ${rel.length} paths (${(size / 1024 / 1024).toFixed(1)} MB) to ${out}`);
+  for (const p of rel) log(`  ${p}${fs.lstatSync(path.join(home, p)).isSymbolicLink() ? "  (symlink; archived its content)" : ""}`);
+  log(`\nRestore later with:  node install.mjs --profile <p> --restore ${out}`);
+  process.exit(0);
+}
+
+// ---- 0 restore ---------------------------------------------------------------------------------------------------------
+const restoreFrom = opt("restore", "");
+if (restoreFrom) {
+  step(0, `restore personal state from ${restoreFrom}`);
+  const tgz = expand(restoreFrom);
+  if (!fs.existsSync(tgz)) fail(`no such archive: ${tgz}`);
+  const list = spawnSync("tar", ["-tzf", tgz], { encoding: "utf8" });
+  if (list.status !== 0) fail(`cannot read archive: ${list.stderr}`);
+  const entries = list.stdout.split("\n").filter(Boolean);
+  const tops = new Set(entries.map((e) => e.replace(/\/$/, "")));
+  const want = [...manifest.backup.essentials, ...manifest.backup.config, ...manifest.backup.history].filter((p) => tops.has(p) || entries.some((e) => e.startsWith(p + "/")));
+  const toRestore = [];
+  for (const p of want) {
+    const dst = path.join(home, p);
+    const exists = fs.existsSync(dst) || (() => { try { fs.lstatSync(dst); return true; } catch { return false; } })();
+    if (exists && !flag("force-restore")) { note(`${p} exists here, kept (--force-restore to overwrite)`); continue; }
+    toRestore.push(p);
+  }
+  if (toRestore.length) {
+    did(`restore ${toRestore.join(", ")}`);
+    if (!DRY) { const r = spawnSync("tar", ["-xzf", tgz, "-C", home, ...toRestore], { encoding: "utf8" }); if (r.status !== 0) fail(`tar extract failed: ${r.stderr}`); }
+  } else note("nothing to restore (everything already present)");
+}
 
 // ---- 1 preflight ---------------------------------------------------------------------------------------------
 step(1, "preflight");
@@ -72,7 +116,11 @@ const wanted = [...manifest.pi.packages, ...(flag("optional") ? manifest.pi.opti
 const installed = new Set(settings.packages ?? []);
 for (const pkg of wanted) {
   const bare = pkg.replace(/^npm:/, "");
-  if (installed.has(pkg) || [...installed].some((p) => p.endsWith(`/${bare}`))) { note(`${pkg} already listed`); continue; }
+  const listed = installed.has(pkg) || [...installed].some((p) => p.endsWith(`/${bare}`));
+  // listed in settings.json but absent on disk (e.g. after a reinstall that restored settings): install anyway
+  const onDisk = pkg.startsWith("npm:") ? fs.existsSync(path.join(agentDir, "npm", "node_modules", bare, "package.json")) : true;
+  if (listed && onDisk) { note(`${pkg} already installed`); continue; }
+  if (listed && !onDisk) note(`${pkg} is listed but missing on disk; reinstalling`);
   did(`pi install ${pkg}`);
   if (!DRY) {
     const r = run("pi", ["install", pkg], { inherit: true });
@@ -83,10 +131,14 @@ settings = readJson(settingsPath, settings); // pi install rewrites it
 
 // ---- 3 settings -------------------------------------------------------------------------------------------------
 step(3, "pi settings");
-const enabled = new Set(settings.enabledModels ?? []);
-const before = enabled.size;
-for (const m of manifest.pi.enabledModels) enabled.add(m);
-if (enabled.size !== before || !settings.enabledModels) { settings.enabledModels = [...enabled]; did(`enabledModels += ${enabled.size - before} bedrouter models`); } else note("enabledModels already include bedrouter/*");
+// Only extend an allowlist that already exists: creating one would hide every non-bedrouter provider.
+if (Array.isArray(settings.enabledModels)) {
+  const enabled = new Set(settings.enabledModels);
+  const before = enabled.size;
+  for (const m of manifest.pi.enabledModels) enabled.add(m);
+  if (enabled.size !== before) { settings.enabledModels = [...enabled]; did(`enabledModels += ${enabled.size - before} bedrouter models`); } else note("enabledModels already include bedrouter/*");
+} else note("no enabledModels allowlist: all providers (bedrouter included) are visible; leaving it that way");
+try { if (fs.lstatSync(settingsPath).isSymbolicLink()) note(`settings.json is a symlink (${fs.readlinkSync(settingsPath)}): dotfiles-managed; writing through the link`); } catch { /* no file yet */ }
 for (const [k, v] of Object.entries(manifest.pi.settings)) if (settings[k] === undefined) { settings[k] = v; did(`settings.${k} = ${JSON.stringify(v)}`); }
 if (flag("default-model")) { settings.defaultProvider = "bedrouter"; settings.defaultModel = ladder.autoSelect; did(`default model = bedrouter/${ladder.autoSelect}`); }
 writeJson(settingsPath, settings);

@@ -13,9 +13,10 @@ Idempotent: run it again any time; it only changes what differs and never overwr
 
 | Step | Action | Where |
 | --- | --- | --- |
+| 0 | With `--restore <tgz>`: puts personal state back from a `backup` archive; never overwrites a file that exists (`--force-restore` to override) | `~/.pi`, `~/.bedrouter` |
 | 1 | Checks node, pi, aws, git; notes whether `openwiki` is installed (optional, Node 22+) | |
-| 2 | `pi install` for every package in `hablo.json` not already listed | `~/.pi/agent/settings.json` → `packages`, code under `~/.pi/agent/npm/` |
-| 3 | Adds the `bedrouter/*` models to `enabledModels` (the allowlist hides everything else), a few UX settings if unset; `--default-model` also makes `bedrouter/auto` the default | `~/.pi/agent/settings.json` |
+| 2 | `pi install` for every package in `hablo.json` that is not both listed in settings and present on disk | `~/.pi/agent/settings.json` → `packages`, code under `~/.pi/agent/npm/` |
+| 3 | Adds the `bedrouter/*` models to `enabledModels` **if an allowlist already exists** (creating one would hide every other provider), a few UX settings only where unset; `--default-model` also makes `bedrouter/auto` the default | `~/.pi/agent/settings.json` |
 | 4 | Writes pi-bedrouter settings (server home, auto-select model, stop-on-exit policy), a `.env` with `AWS_PROFILE`, and a `bedrouter.json` ladder copied from the installed package's example with routing set for the demo (`honorClientModel: false`, classifier on) | `~/.pi/agent/pi-bedrouter.json`, `~/.bedrouter/` |
 | 5 | If the AWS profile is missing, runs `aws configure sso --profile <p>` (interactive); if credentials are expired, runs `aws sso login` | `~/.aws/config`, SSO token cache |
 | 6 | **Entitlement probe**: one 1-token request per rung. Rungs this account cannot invoke are swapped for fallbacks from the manifest (opus-5 → opus-4.8 → 4.7; sonnet-5 → sonnet-4.6) and re-probed; rungs with no working fallback are dropped and the routing classes repaired | `~/.bedrouter/bedrouter.json` |
@@ -31,7 +32,8 @@ Then: `pi --provider bedrouter --model auto` (or `auto-oss` with `--ladder oss`)
 | --- | --- |
 | `--profile <name>` | AWS profile for bedrouter (`AWS_PROFILE` in `~/.bedrouter/.env`). Any SSO profile works; the name is whatever `aws configure sso` produced |
 | `--ladder claude \| oss` | Which family `auto` should point at (`claude` default). Both ladders are installed; this picks the auto-selected model and the model notes' default |
-| `--optional` | Also install the optional packages (web access, vision handoff, impeccable, codex usage) |
+| `--restore <tgz>` | Step 0: restore a `backup` archive (see below) |
+| `--force-restore` | Let the restore overwrite files that already exist |
 | `--default-model` | Make `bedrouter/auto` Pi's default model, not just the auto-selected one |
 | `--home <dir>` | bedrouter working dir (default `~/.bedrouter`): `.env`, `bedrouter.json`, decision log, server log |
 | `--skip-aws` `--skip-probe` `--skip-agents` `--skip-firstmate` | Skip a step |
@@ -40,6 +42,40 @@ Then: `pi --provider bedrouter --model auto` (or `auto-oss` with `--ladder oss`)
 | `--no-branch-policy` | Don't write the Jira-branch policy into firstmate's `data/captain.md` |
 | `--force-agents` | Overwrite existing agent profiles / workflows with the bundled ones |
 | `--dry-run` | Print, don't write |
+
+## Backup, uninstall, reinstall
+
+`node install.mjs backup` writes `~/hablo-backup-<timestamp>.tgz` containing the state that cannot be regenerated and does not live in dotfiles: `~/.pi/agent/auth.json` (OAuth logins), `trust.json`, and `~/.bedrouter/.env` + `bedrouter.json` if present. It also archives the config the installer or dotfiles would regenerate anyway (`settings.json`, `models.json`, `pi-bedrouter.json`, `workflows.json`, `agents/`, `~/.pi/workflows/`), following symlinks so the archive holds real content. Sessions, model caches and logs are **not** included unless you pass `--with-history`. `--restore <tgz>` puts entries back only where the destination is missing, so it is safe to run on a machine that already has some of it.
+
+What is *not* in `~/.pi` and therefore unaffected by any of this: `~/.aws` (SSO profiles and token cache), `~/.dotfiles`, project repositories and their `openwiki/` directories, and the firstmate clone.
+
+To uninstall Pi completely and rebuild it with this installer:
+
+```sh
+# 1. back up (auth + trust + config; add --with-history if you want sessions)
+cd ~/projects/ai/HABLO-installer && node install.mjs backup
+
+# 2. remove Pi and its state
+which pi                                   # tells you how it was installed
+npm uninstall -g @earendil-works/pi-coding-agent   # or: bun remove -g @earendil-works/pi-coding-agent
+mv ~/.pi ~/.pi.old-$(date +%F)             # move, don't delete, until you're happy
+
+# 3. reinstall Pi
+npm install -g @earendil-works/pi-coding-agent
+
+# 4. on a dotfiles-managed machine, put the config symlinks back FIRST so the installer writes through them
+cd ~/.dotfiles && stow -R pi
+
+# 5. rebuild everything, restoring auth and trust
+cd ~/projects/ai/HABLO-installer && ./install.sh --profile <aws-profile> --restore ~/hablo-backup-<timestamp>.tgz
+
+# 6. verify, then clean up
+pi --list-models | grep -c bedrouter       # 7
+./install.sh --profile <aws-profile> --dry-run   # every line should read "already installed / present / up to date"
+rm -rf ~/.pi.old-*                         # when satisfied
+```
+
+Step 4 matters on machines where `~/.pi/agent/settings.json` and friends are stow symlinks into `~/.dotfiles/pi`: with the links in place, the installer edits the dotfiles copy (it says so: "settings.json is a symlink … dotfiles-managed"), and `--restore` leaves those files alone because they already exist. Skip step 4 on a machine without dotfiles; the installer then creates plain files.
 
 ## Prerequisites
 

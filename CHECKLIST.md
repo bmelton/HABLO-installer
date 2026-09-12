@@ -2,6 +2,7 @@
 
 Fifteen minutes, in order. Everything after step 3 is verification.
 
+0. **Fresh machine?** Follow "Backup, uninstall, reinstall" in the README once; the rest of this list assumes Pi and the packages are installed.
 1. **Credentials.** `aws sso login --profile <p>`. Then `aws sts get-caller-identity --profile <p>` shows an `AWSReservedSSO_…` ARN.
 2. **Install / refresh.** `./install.sh --profile <p>` (safe to re-run). If Pi packages were installed earlier: `pi update --extensions` first so `pi-bedrouter` and `pi-openwiki-adapter` are current.
 3. **Probe.** Step 6 of the installer, or inside Pi: `/bedrouter probe`. Every rung must say `ok`. If the corporate account lacks a model, the installer already swapped or dropped it; read the ladder it printed so you know what "opus" means today.
