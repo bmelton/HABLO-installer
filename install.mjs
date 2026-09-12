@@ -6,10 +6,11 @@
 //   node install.mjs --profile <aws-profile> [--restore <tgz>] [--ladder claude|oss] [--dry-run] [--optional] [--default-model]
 //                    [--skip-aws] [--skip-probe] [--skip-agents] [--force-agents] [--home <dir>]
 //                    [--skip-firstmate] [--firstmate-dir <dir>] [--backend tmux|herdr] [--no-branch-policy]
+//                    [--install-pi] [--pi-manager npm|bun|pnpm]   install the Pi CLI itself when it is missing
 //
 // Steps (each prints what it did or would do):
 //   0 restore     with --restore <tgz>: put personal state back (never overwrites an existing file unless --force-restore)
-//   1 preflight   node, pi, aws, git; openwiki (advisory)
+//   1 preflight   node, pi (installed globally with --install-pi when missing), aws, git; openwiki (advisory)
 //   2 packages    pi install npm:<pkg> for anything not yet in settings.json packages
 //   3 settings    enabledModels += bedrouter/*; a few UX settings; optional default model
 //   4 bedrouter   ~/.pi/agent/pi-bedrouter.json, ~/.bedrouter/.env and bedrouter.json (from the installed example)
@@ -99,9 +100,23 @@ if (restoreFrom) {
 step(1, "preflight");
 const nodeMajor = Number(process.versions.node.split(".")[0]);
 note(`node ${process.versions.node}${nodeMajor < manifest.openwiki.minNode ? `  (OpenWiki needs ${manifest.openwiki.minNode}+; pi and bedrouter are fine on 20+)` : ""}`);
-const piBin = which("pi");
-if (!piBin) fail("pi is not installed. Install it first:  npm install -g @earendil-works/pi-coding-agent");
-note(`pi   ${run("pi", ["--version"]).stdout?.trim() || piBin}`);
+let piBin = which("pi");
+const cliPkg = manifest.pi.cliPackage;
+if (!piBin && flag("install-pi")) {
+  // pick the global package manager: explicit flag, else whichever is on PATH (bun first: faster, same result)
+  const mgr = opt("pi-manager", ["bun", "pnpm", "npm"].find((m) => which(m)) ?? "npm");
+  const cmd = { npm: ["npm", ["install", "-g", cliPkg]], bun: ["bun", ["add", "-g", cliPkg]], pnpm: ["pnpm", ["add", "-g", cliPkg]] }[mgr];
+  if (!cmd) fail(`--pi-manager must be npm, bun or pnpm (got ${mgr})`);
+  did(`${cmd[0]} ${cmd[1].join(" ")}`);
+  if (!DRY) {
+    const r = run(cmd[0], cmd[1], { inherit: true, timeout: 600_000 });
+    if (r.status !== 0) fail(`${cmd[0]} could not install ${cliPkg} (exit ${r.status}); on EACCES use a user-level global prefix (nvm, or \`npm config set prefix ~/.npm-global\`)`);
+    piBin = which("pi");
+    if (!piBin) fail(`${cliPkg} installed but \`pi\` is not on PATH; open a new shell or add your global bin directory to PATH, then re-run`);
+  }
+}
+if (!piBin && !DRY) fail(`pi is not installed. Re-run with --install-pi, or install it yourself:  npm install -g ${cliPkg}`);
+note(piBin ? `pi   ${run("pi", ["--version"]).stdout?.trim() || piBin}` : `pi   would be installed (${cliPkg})`);
 const awsBin = which("aws");
 note(awsBin ? `aws  ${run("aws", ["--version"]).stdout?.trim() || awsBin}` : "aws  MISSING - install the AWS CLI (brew install awscli) before the AWS step");
 note(which("git") ? "git  ok" : "git  MISSING (needed by OpenWiki freshness checks)");

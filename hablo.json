@@ -32,7 +32,8 @@
         "mermaid": "streaming"
       }
     },
-    "$comment": "settings are applied only where the key is absent (never overriding a value you set); enabledModels is only extended when an allowlist already exists (creating one would hide every non-bedrouter provider)."
+    "$comment": "settings are applied only where the key is absent (never overriding a value you set); enabledModels is only extended when an allowlist already exists (creating one would hide every non-bedrouter provider).",
+    "cliPackage": "@earendil-works/pi-coding-agent"
   },
   "bedrouter": {
     "home": "~/.bedrouter",

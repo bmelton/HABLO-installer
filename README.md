@@ -4,7 +4,7 @@ One command that takes a machine with Node and Pi on it to the HABLO setup: Pi p
 
 ```sh
 git clone <this repo> && cd HABLO-installer
-./install.sh --profile <aws-sso-profile>            # e.g. --profile <username>
+./install.sh --install-pi --profile <aws-sso-profile>            # e.g. --profile <username>
 ```
 
 Idempotent: run it again any time; it only changes what differs and never overwrites your agent profiles unless told to. `--dry-run` prints the plan without writing anything.
@@ -14,7 +14,7 @@ Idempotent: run it again any time; it only changes what differs and never overwr
 | Step | Action | Where |
 | --- | --- | --- |
 | 0 | With `--restore <tgz>`: puts personal state back from a `backup` archive; never overwrites a file that exists (`--force-restore` to override) | `~/.pi`, `~/.bedrouter` |
-| 1 | Checks node, pi, aws, git; notes whether `openwiki` is installed (optional, Node 22+) | |
+| 1 | Checks node, pi, aws, git; with `--install-pi`, installs `@earendil-works/pi-coding-agent` globally when `pi` is missing (skipped when present); notes whether `openwiki` is installed (optional, Node 22+) | global npm/bun/pnpm prefix |
 | 2 | `pi install` for every package in `hablo.json`, **and every `npm:`/`git:` package already listed in your `settings.json`**, that is not present on disk — so packages you added yourself come back after a reinstall too | `~/.pi/agent/settings.json` → `packages`, code under `~/.pi/agent/npm/` |
 | 3 | Adds the `bedrouter/*` models to `enabledModels` **if an allowlist already exists** (creating one would hide every other provider), a few UX settings only where unset; `--default-model` also makes `bedrouter/auto` the default | `~/.pi/agent/settings.json` |
 | 4 | Writes pi-bedrouter settings (server home, auto-select model, stop-on-exit policy), a `.env` with `AWS_PROFILE`, and a `bedrouter.json` ladder copied from the installed package's example with routing set for the demo (`honorClientModel: false`, classifier on) | `~/.pi/agent/pi-bedrouter.json`, `~/.bedrouter/` |
@@ -32,6 +32,7 @@ Then: `pi --provider bedrouter --model auto` (or `auto-oss` with `--ladder oss`)
 | --- | --- |
 | `--profile <name>` | AWS profile for bedrouter (`AWS_PROFILE` in `~/.bedrouter/.env`). Any SSO profile works; the name is whatever `aws configure sso` produced |
 | `--ladder claude \| oss` | Which family `auto` should point at (`claude` default). Both ladders are installed; this picks the auto-selected model and the model notes' default |
+| `--install-pi` | Install the Pi CLI globally if `pi` is not on PATH; a no-op when it is. `--pi-manager npm\|bun\|pnpm` picks the tool (default: bun if present, else pnpm, else npm) |
 | `--restore <tgz>` | Step 0: restore a `backup` archive (see below) |
 | `--force-restore` | Let the restore overwrite files that already exist |
 | `--default-model` | Make `bedrouter/auto` Pi's default model, not just the auto-selected one |
@@ -60,14 +61,14 @@ which pi                                   # tells you how it was installed
 npm uninstall -g @earendil-works/pi-coding-agent   # or: bun remove -g @earendil-works/pi-coding-agent
 mv ~/.pi ~/.pi.old-$(date +%F)             # move, don't delete, until you're happy
 
-# 3. reinstall Pi
+# 3. reinstall Pi — by hand, or let step 5 do it via --install-pi
 npm install -g @earendil-works/pi-coding-agent
 
 # 4. on a dotfiles-managed machine, put the config symlinks back FIRST so the installer writes through them
 cd ~/.dotfiles && stow -R pi
 
 # 5. rebuild everything, restoring auth and trust
-cd ~/projects/ai/HABLO-installer && ./install.sh --profile <aws-profile> --restore ~/hablo-backup-<timestamp>.tgz
+cd ~/projects/ai/HABLO-installer && ./install.sh --install-pi --profile <aws-profile> --restore ~/hablo-backup-<timestamp>.tgz
 
 # 6. verify, then clean up
 pi --list-models | grep -c bedrouter       # 7
@@ -79,7 +80,7 @@ Step 4 matters on machines where `~/.pi/agent/settings.json` and friends are sto
 
 ## Prerequisites
 
-Node 20+ (22+ if you also want OpenWiki), Pi (`npm install -g @earendil-works/pi-coding-agent`), the AWS CLI for SSO login, git. An AWS principal allowed to call Bedrock (`bedrock:InvokeModel*`; the read-only `bedrock:List*`/`Get*` help the probe explain itself). On a personal account the bedrouter README describes the IAM Identity Center setup; on a corporate account `aws configure sso` against the corporate start URL is all it takes.
+Node 20+ (22+ if you also want OpenWiki), Pi (installed for you with `--install-pi`, or `npm install -g @earendil-works/pi-coding-agent`), the AWS CLI for SSO login, git. An AWS principal allowed to call Bedrock (`bedrock:InvokeModel*`; the read-only `bedrock:List*`/`Get*` help the probe explain itself). On a personal account the bedrouter README describes the IAM Identity Center setup; on a corporate account `aws configure sso` against the corporate start URL is all it takes.
 
 ## Files
 
