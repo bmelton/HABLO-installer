@@ -51,6 +51,9 @@ const step = (n, title) => log(`\n[${n}] ${title}`);
 const did = (s) => log(`  ${DRY ? "would " : ""}${s}`);
 const note = (s) => log(`  ${s}`);
 function fail(msg) { console.error(`\nERROR: ${msg}`); process.exit(1); }
+// Non-fatal problems in the AWS/probe steps: later steps (agents, firstmate, hablo) do not depend on them, so keep going.
+const warnings = [];
+function warn(msg) { warnings.push(msg); note(`WARNING: ${msg}`); }
 const readJson = (p, fallback) => { try { return JSON.parse(fs.readFileSync(p, "utf8")); } catch { return fallback; } };
 function writeJson(p, obj) { if (DRY) return; fs.mkdirSync(path.dirname(p), { recursive: true }); fs.writeFileSync(p, JSON.stringify(obj, null, 2) + "\n"); }
 function writeText(p, text) { if (DRY) return; fs.mkdirSync(path.dirname(p), { recursive: true }); fs.writeFileSync(p, text); }
@@ -241,23 +244,24 @@ else {
   if (!hasProfile) {
     note(`profile "${profile}" is not in ~/.aws/config.`);
     did(`aws configure sso --profile ${profile}   (interactive: SSO start URL, region, account, role)`);
-    if (!DRY) { const r = run("aws", ["configure", "sso", "--profile", profile], { inherit: true, timeout: 600_000 }); if (r.status !== 0) fail("aws configure sso did not complete"); }
+    if (!DRY) { const r = run("aws", ["configure", "sso", "--profile", profile], { inherit: true, timeout: 600_000 }); if (r.status !== 0) warn("aws configure sso did not complete; re-run the installer after `aws configure sso --profile " + profile + "`"); }
   } else note(`profile "${profile}" found in ~/.aws/config`);
   const who = run("aws", ["sts", "get-caller-identity", "--profile", profile]);
   if (who.status === 0) note(`credentials valid: ${JSON.parse(who.stdout).Arn}`);
   else {
     did(`aws sso login --profile ${profile}`);
-    if (!DRY) { const r = run("aws", ["sso", "login", "--profile", profile], { inherit: true, timeout: 600_000 }); if (r.status !== 0) fail("aws sso login failed"); }
+    if (!DRY) { const r = run("aws", ["sso", "login", "--profile", profile], { inherit: true, timeout: 600_000 }); if (r.status !== 0) warn("aws sso login failed; re-run the installer after `aws sso login --profile " + profile + "`"); }
   }
 }
 
 // ---- 6 probe ----------------------------------------------------------------------------------------------------------
 step(6, "entitlement probe (which rungs this account can invoke)");
 if (flag("skip-probe") || DRY) note(DRY ? "skipped in dry run" : "skipped (--skip-probe)");
-else {
+else probeStep();
+function probeStep() {
   const probe = () => run(process.execPath, [brCli, "doctor", "--probe"], { cwd: brHome, env: { BEDROUTER_CONFIG: cfgPath }, timeout: 180_000 });
   let out = probe();
-  if (!/^probe:/m.test(out.stdout ?? "")) { note((out.stdout || out.stderr || "").trim().split("\n").slice(0, 4).join("\n  ")); fail("probe did not run; fix credentials (step 5) and re-run"); }
+  if (!/^probe:/m.test(out.stdout ?? "")) { note((out.stdout || out.stderr || "").trim().split("\n").slice(0, 4).join("\n  ")); warn("entitlement probe did not run (no valid AWS credentials?); fix step 5 and re-run, or pass --skip-probe"); return; }
   const denied = () => [...(out.stdout ?? "").matchAll(/^\s+DENIED\s+(\S+)\s+(\S+)/gm)].map((m) => ({ alias: m[1], id: m[2] }));
   let d = denied();
   let changed = false;
@@ -409,6 +413,6 @@ else {
 }
 
 // ---- done ---------------------------------------------------------------------------------------------------------------
-log(`\nDone${DRY ? " (dry run; nothing written)" : ""}.`);
+log(`\nDone${DRY ? " (dry run; nothing written)" : ""}${warnings.length ? ` with ${warnings.length} warning(s):\n  - ${warnings.join("\n  - ")}` : ""}.`);
 log(`Next:\n  pi --provider bedrouter --model ${ladder.autoSelect}\n  /bedrouter status      /bedrouter probe      /bedrouter report\n  in a repo with a wiki: /openwiki doctor${flag("skip-firstmate") ? "" : `\n  firstmate: cd <your project> && hablo       (then: ahoy!)   -  or cd ${fmDir} && pi`}`);
 if (!profile) log(`  (set AWS_PROFILE in ${envPath}, then: aws sso login --profile <name>)`);
