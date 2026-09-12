@@ -79,6 +79,10 @@
       "git",
       "gh",
       "tmux"
-    ]
+    ],
+    "crewDispatch": "firstmate/crew-dispatch.json",
+    "captainPolicy": "firstmate/captain-branch-policy.md",
+    "backend": null,
+    "$comment2": "backend: null keeps firstmate's auto-detection (tmux). Set \"herdr\" (or pass --backend herdr) to write config/backend."
   }
 }

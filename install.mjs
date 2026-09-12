@@ -4,7 +4,7 @@
 //
 //   node install.mjs --profile <aws-profile> [--ladder claude|oss] [--dry-run] [--optional] [--default-model]
 //                    [--skip-aws] [--skip-probe] [--skip-agents] [--force-agents] [--home <dir>]
-//                    [--skip-firstmate] [--firstmate-dir <dir>]
+//                    [--skip-firstmate] [--firstmate-dir <dir>] [--backend tmux|herdr] [--no-branch-policy]
 //
 // Steps (each prints what it did or would do):
 //   1 preflight   node, pi, aws, git; openwiki (advisory)
@@ -15,7 +15,8 @@
 //   6 probe       bedrouter doctor --probe; swap unentitled rungs for fallbacks from the manifest, drop the rest
 //   7 agents      agent profiles + workflows into ~/.pi (never overwrites without --force-agents)
 //   8 fit notes   pi-agents model notes into ~/.pi/agent/workflows.json
-//   9 firstmate   clone/update kunchenguid/firstmate, set its crew harness to pi (--skip-firstmate to skip)
+//   9 firstmate   clone/update kunchenguid/firstmate; crew harness = pi; crew-dispatch.json routing every crewmate
+//                 through bedrouter; captain.md branch-per-Jira-ticket policy; optional config/backend (--backend herdr)
 import { execFileSync, spawnSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
@@ -247,12 +248,37 @@ else {
     const chPath = path.join(fmDir, "config", "crew-harness");
     const cur = fs.existsSync(chPath) ? fs.readFileSync(chPath, "utf8").trim() : "";
     if (cur !== fm.crewHarness) { writeText(chPath, fm.crewHarness + "\n"); did(`write ${path.relative(home, chPath)} = ${fm.crewHarness}`); } else note(`crew harness already ${cur}`);
-    if (!flag("default-model") && settings.defaultProvider !== "bedrouter") note(`crewmates use Pi's default model (${settings.defaultProvider ? `${settings.defaultProvider}/${settings.defaultModel}` : "unset"}); re-run with --default-model to route them through bedrouter/${ladder.autoSelect}`);
-    else note(`crewmates will run on bedrouter/${settings.defaultModel ?? ladder.autoSelect} (Pi default)`);
+    // Dispatch profiles: every crewmate/scout is `pi --model bedrouter/<auto>`, explicitly, so routing does not depend on
+    // Pi's default model. (When this file exists fm-spawn refuses any spawn without a resolved harness, by design.)
+    const model = `bedrouter/${ladder.autoSelect}`;
+    const dispatch = fs.readFileSync(path.join(here, fm.crewDispatch), "utf8").replace(/__MODEL__/g, model);
+    const dispatchPath = path.join(fmDir, "config", "crew-dispatch.json");
+    const curDispatch = fs.existsSync(dispatchPath) ? fs.readFileSync(dispatchPath, "utf8") : "";
+    if (curDispatch !== dispatch) {
+      if (curDispatch && !/HABLO-installer/.test(curDispatch)) note(`${path.relative(home, dispatchPath)} exists and was not written by this installer; leaving it (delete it to adopt the HABLO one)`);
+      else { writeText(dispatchPath, dispatch); did(`write ${path.relative(home, dispatchPath)}: every crewmate -> pi + ${model}`); }
+    } else note(`crew dispatch already routes every crewmate through ${model}`);
+    if (!which("jq")) note("jq is required by firstmate to validate crew-dispatch.json (brew install jq)");
+    // Backend
+    const backend = opt("backend", fm.backend);
+    if (backend) {
+      const bPath = path.join(fmDir, "config", "backend");
+      const curB = fs.existsSync(bPath) ? fs.readFileSync(bPath, "utf8").trim() : "";
+      if (curB !== backend) { writeText(bPath, backend + "\n"); did(`write ${path.relative(home, bPath)} = ${backend}`); } else note(`backend already ${backend}`);
+    }
+    // Branch policy: a standing captain preference (data/captain.md is firstmate's canonical, gitignored policy file).
+    if (!flag("no-branch-policy")) {
+      const policy = fs.readFileSync(path.join(here, fm.captainPolicy), "utf8").trim() + "\n";
+      const capPath = path.join(fmDir, "data", "captain.md");
+      const cur = fs.existsSync(capPath) ? fs.readFileSync(capPath, "utf8") : "";
+      const block = /<!-- HABLO:BRANCH-POLICY:START -->[\s\S]*?<!-- HABLO:BRANCH-POLICY:END -->\n?/;
+      const next = block.test(cur) ? cur.replace(block, policy) : (cur ? cur.replace(/\s*$/, "\n\n") : "# Captain preferences\n\n") + policy;
+      if (next !== cur) { writeText(capPath, next); did(`${cur ? "update" : "write"} ${path.relative(home, capPath)}: branch-per-Jira-ticket policy`); } else note("captain.md branch policy up to date");
+    }
   }
 }
 
 // ---- done ---------------------------------------------------------------------------------------------------------------
 log(`\nDone${DRY ? " (dry run; nothing written)" : ""}.`);
-log(`Next:\n  pi --provider bedrouter --model ${ladder.autoSelect}\n  /bedrouter status      /bedrouter probe      /bedrouter report\n  in a repo with a wiki: /openwiki doctor${flag("skip-firstmate") ? "" : `\n  firstmate: cd ${fmDir} && pi       (then: ahoy!)`}`);
+log(`Next:\n  pi --provider bedrouter --model ${ladder.autoSelect}\n  /bedrouter status      /bedrouter probe      /bedrouter report\n  in a repo with a wiki: /openwiki doctor${flag("skip-firstmate") ? "" : `\n  firstmate: cd ${fmDir} && pi --provider bedrouter --model ${ladder.autoSelect}       (then: ahoy!)`}`);
 if (!profile) log(`  (set AWS_PROFILE in ${envPath}, then: aws sso login --profile <name>)`);
