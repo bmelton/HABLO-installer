@@ -98,6 +98,24 @@ if (restoreFrom) {
 
 // ---- 1 preflight ---------------------------------------------------------------------------------------------
 step(1, "preflight");
+// Dangling symlinks under ~/.pi (a removed dotfiles package leaves settings.json -> nowhere) make Pi load nothing and
+// make every write below land in a directory that no longer exists. Remove them first; the steps recreate real files.
+{
+  const dangling = [];
+  const walk = (d, depth = 0) => {
+    if (!fs.existsSync(d) || depth > 3) return;
+    for (const name of fs.readdirSync(d)) {
+      if (name === "npm" || name === "sessions") continue;
+      const p = path.join(d, name);
+      let st; try { st = fs.lstatSync(p); } catch { continue; }
+      if (st.isSymbolicLink()) { if (!fs.existsSync(p)) dangling.push(p); }
+      else if (st.isDirectory()) walk(p, depth + 1);
+    }
+  };
+  walk(piDir);
+  for (const p of dangling) { did(`remove dangling symlink ${path.relative(home, p)} -> ${fs.readlinkSync(p)}`); if (!DRY) fs.unlinkSync(p); }
+  if (dangling.length) note("(these pointed at a dotfiles package that no longer exists; real files are written in their place)");
+}
 const nodeMajor = Number(process.versions.node.split(".")[0]);
 note(`node ${process.versions.node}${nodeMajor < manifest.openwiki.minNode ? `  (OpenWiki needs ${manifest.openwiki.minNode}+; pi and bedrouter are fine on 20+)` : ""}`);
 let piBin = which("pi");
