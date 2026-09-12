@@ -25,7 +25,9 @@
     "settings": {
       "steeringMode": "one-at-a-time",
       "hideThinkingBlock": true,
-      "markdown": { "mermaid": "streaming" }
+      "markdown": {
+        "mermaid": "streaming"
+      }
     }
   },
   "bedrouter": {
@@ -34,21 +36,49 @@
     "region": "us-east-1",
     "routing": {
       "honorClientModel": false,
-      "classifier": { "enabled": true, "model": "haiku", "mode": "fallback" }
+      "classifier": {
+        "enabled": true,
+        "model": "haiku",
+        "mode": "fallback"
+      }
     },
     "ladders": {
-      "claude": { "family": "anthropic", "autoSelect": "auto" },
-      "oss": { "family": "openai", "autoSelect": "auto-oss" }
+      "claude": {
+        "family": "anthropic",
+        "autoSelect": "auto"
+      },
+      "oss": {
+        "family": "openai",
+        "autoSelect": "auto-oss"
+      }
     },
     "fallbacks": {
       "$comment": "When the probe says a rung is not entitled on this account, try these Bedrock IDs in order before dropping the rung.",
-      "us.anthropic.claude-opus-5": ["us.anthropic.claude-opus-4-8", "us.anthropic.claude-opus-4-7", "us.anthropic.claude-opus-4-6-v1"],
-      "us.anthropic.claude-sonnet-5": ["us.anthropic.claude-sonnet-4-6", "us.anthropic.claude-sonnet-4-5-20250929-v1:0"],
+      "us.anthropic.claude-opus-5": [
+        "us.anthropic.claude-opus-4-8",
+        "us.anthropic.claude-opus-4-7",
+        "us.anthropic.claude-opus-4-6-v1"
+      ],
+      "us.anthropic.claude-sonnet-5": [
+        "us.anthropic.claude-sonnet-4-6",
+        "us.anthropic.claude-sonnet-4-5-20250929-v1:0"
+      ],
       "us.anthropic.claude-fable-5-1": []
     }
   },
   "openwiki": {
     "npmPackage": "openwiki",
     "minNode": 22
+  },
+  "firstmate": {
+    "$comment": "kunchenguid/firstmate is an agent distro, not a Pi package: a git clone whose AGENTS.md takes over the harness you launch inside it. Crewmates run `pi -e <ext> \"<brief>\"` with no model flag, so Pi's default model is what they use; the installer sets config/crew-harness to pi.",
+    "repo": "https://github.com/kunchenguid/firstmate",
+    "dir": "~/firstmate",
+    "crewHarness": "pi",
+    "requires": [
+      "git",
+      "gh",
+      "tmux"
+    ]
   }
 }

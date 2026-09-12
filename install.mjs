@@ -4,6 +4,7 @@
 //
 //   node install.mjs --profile <aws-profile> [--ladder claude|oss] [--dry-run] [--optional] [--default-model]
 //                    [--skip-aws] [--skip-probe] [--skip-agents] [--force-agents] [--home <dir>]
+//                    [--skip-firstmate] [--firstmate-dir <dir>]
 //
 // Steps (each prints what it did or would do):
 //   1 preflight   node, pi, aws, git; openwiki (advisory)
@@ -14,6 +15,7 @@
 //   6 probe       bedrouter doctor --probe; swap unentitled rungs for fallbacks from the manifest, drop the rest
 //   7 agents      agent profiles + workflows into ~/.pi (never overwrites without --force-agents)
 //   8 fit notes   pi-agents model notes into ~/.pi/agent/workflows.json
+//   9 firstmate   clone/update kunchenguid/firstmate, set its crew harness to pi (--skip-firstmate to skip)
 import { execFileSync, spawnSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
@@ -221,7 +223,36 @@ for (const [f, rungs] of Object.entries(cfg.families)) {
 }
 if (JSON.stringify(wf.models ?? {}) !== JSON.stringify(notes)) { writeJson(wfPath, { ...wf, models: notes }); did(`write ${Object.keys(notes).length} model notes to ${wfPath}`); } else note("model notes up to date");
 
+// ---- 9 firstmate --------------------------------------------------------------------------------------------------------------
+step(9, "firstmate (kunchenguid/firstmate)");
+const fm = manifest.firstmate;
+const fmDir = expand(opt("firstmate-dir", fm.dir));
+if (flag("skip-firstmate")) note("skipped (--skip-firstmate)");
+else {
+  const missing = fm.requires.filter((c) => !which(c));
+  if (missing.length) note(`missing: ${missing.join(", ")} (firstmate needs git + gh for its GitHub flows and tmux as the crew runtime; brew install ${missing.join(" ")})`);
+  const ghAuth = which("gh") ? run("gh", ["auth", "status"]) : null;
+  if (ghAuth && ghAuth.status !== 0) note("gh is not authenticated: run `gh auth login` before the first voyage");
+  if (fs.existsSync(path.join(fmDir, ".git"))) {
+    did(`git -C ${fmDir} pull --ff-only`);
+    if (!DRY) { const r = run("git", ["-C", fmDir, "pull", "--ff-only"]); note(r.status === 0 ? (r.stdout.trim().split("\n").pop() ?? "updated") : `pull failed (${(r.stderr || "").trim().split("\n")[0]}); left as is`); }
+  } else if (fs.existsSync(fmDir)) note(`${fmDir} exists but is not a git checkout; skipping (use --firstmate-dir to pick another location)`);
+  else {
+    did(`git clone ${fm.repo} ${fmDir}`);
+    if (!DRY) { const r = run("git", ["clone", "--quiet", fm.repo, fmDir], { inherit: true, timeout: 600_000 }); if (r.status !== 0) note("clone failed; firstmate step incomplete"); }
+  }
+  if (fs.existsSync(fmDir) || DRY) {
+    // Crewmates inherit Pi's default model (fm-spawn.sh runs `pi -e <ext> "<brief>"` with no model flag): pin the crew
+    // harness to pi and, unless --default-model was given, say what that means for routing.
+    const chPath = path.join(fmDir, "config", "crew-harness");
+    const cur = fs.existsSync(chPath) ? fs.readFileSync(chPath, "utf8").trim() : "";
+    if (cur !== fm.crewHarness) { writeText(chPath, fm.crewHarness + "\n"); did(`write ${path.relative(home, chPath)} = ${fm.crewHarness}`); } else note(`crew harness already ${cur}`);
+    if (!flag("default-model") && settings.defaultProvider !== "bedrouter") note(`crewmates use Pi's default model (${settings.defaultProvider ? `${settings.defaultProvider}/${settings.defaultModel}` : "unset"}); re-run with --default-model to route them through bedrouter/${ladder.autoSelect}`);
+    else note(`crewmates will run on bedrouter/${settings.defaultModel ?? ladder.autoSelect} (Pi default)`);
+  }
+}
+
 // ---- done ---------------------------------------------------------------------------------------------------------------
 log(`\nDone${DRY ? " (dry run; nothing written)" : ""}.`);
-log(`Next:\n  pi --provider bedrouter --model ${ladder.autoSelect}\n  /bedrouter status      /bedrouter probe      /bedrouter report\n  in a repo with a wiki: /openwiki doctor`);
+log(`Next:\n  pi --provider bedrouter --model ${ladder.autoSelect}\n  /bedrouter status      /bedrouter probe      /bedrouter report\n  in a repo with a wiki: /openwiki doctor${flag("skip-firstmate") ? "" : `\n  firstmate: cd ${fmDir} && pi       (then: ahoy!)`}`);
 if (!profile) log(`  (set AWS_PROFILE in ${envPath}, then: aws sso login --profile <name>)`);
