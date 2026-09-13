@@ -3,6 +3,8 @@
 // Zero dependencies. Node 20+ to run; Node 22+ is required for OpenWiki itself (checked, not enforced).
 //
 //   node install.mjs backup [--to <dir>] [--with-history]   archive auth + trust (+ config; + sessions/caches/logs with the flag)
+//   node install.mjs uninstall [--yes] [--with-state] [--with-globals] [--with-firstmate]
+//                              [--with-services] [--remove-pi] [--all] [--no-backup] [--infer] [--receipt <path>]
 //   node install.mjs [--profile <aws-profile>] [--restore <tgz>] [--dry-run] [--optional] [--default-model]
 //                    (profile defaults to hablo.json; AWS_PROFILE in the environment also counts)
 //                    [--skip-aws] [--skip-probe] [--skip-agents] [--force-agents] [--home <dir>]
@@ -38,6 +40,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { runUninstall } from "./uninstall.mjs";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const manifest = JSON.parse(fs.readFileSync(path.join(here, "hablo.json"), "utf8"));
@@ -114,6 +117,12 @@ const versionGte = (v, min) => {
   return true;
 };
 
+if (args[0] === "uninstall") {
+  try { runUninstall({ manifest, here, args: args.slice(1), home, agentDir }); }
+  catch (error) { fail(error.message); }
+  process.exit(0);
+}
+
 // ---- backup subcommand ------------------------------------------------------------------------------------------------
 if (args[0] === "backup") {
   const to = expand(opt("to", "~"));
@@ -159,6 +168,18 @@ if (restoreFrom) {
 if (!DRY) {
   receipt = readJson(receiptPath, { version: 1, runs: [] });
   if (receipt.version !== 1 || !Array.isArray(receipt.runs)) fail(`invalid receipt at ${receiptPath}`);
+  const retainRuns = Math.max(2, Number(manifest.receipt?.retainRuns) || 50);
+  if (receipt.runs.length >= retainRuns) {
+    const foldCount = receipt.runs.length - (retainRuns - 2);
+    const folded = receipt.runs.slice(0, foldCount);
+    receipt.runs = [{
+      at: folded[0]?.at ?? new Date(0).toISOString(),
+      through: folded.at(-1)?.at,
+      installer: "HABLO-installer compacted uninstall baseline",
+      argv: [],
+      actions: folded.flatMap((r) => Array.isArray(r.actions) ? r.actions : []),
+    }, ...receipt.runs.slice(foldCount)];
+  }
   const rev = run("git", ["-C", here, "rev-parse", "--short", "HEAD"]);
   const dirty = run("git", ["-C", here, "status", "--porcelain"]);
   receiptRun = {
@@ -168,7 +189,6 @@ if (!DRY) {
     actions: [],
   };
   receipt.runs.push(receiptRun);
-  // retainRuns is intentionally not enforced until phase B can compact old runs without losing the oldest `prior`.
   flushReceipt();
 }
 
@@ -703,7 +723,7 @@ else {
       const unit = jira.agent.service.systemdUnit; const userDir = path.join(home, ".config", "systemd", "user");
       writeText(path.join(userDir, `${unit}.service`), `[Unit]\nDescription=HABLO Jira agent\n[Service]\nType=oneshot\nExecStart=${agentBin} tick\n`);
       writeText(path.join(userDir, `${unit}.timer`), `[Unit]\nDescription=Poll Jira for HABLO work\n[Timer]\nOnBootSec=1min\nOnUnitActiveSec=${jira.agent.intervalSeconds}s\nAccuracySec=1s\n[Install]\nWantedBy=timers.target\n`);
-      did(`install and enable ${unit}.timer`); if (!DRY) { run("systemctl", ["--user", "daemon-reload"]); const r=run("systemctl", ["--user", "enable", "--now", `${unit}.timer`]); if(r.status!==0)warn(`systemd timer enable failed: ${(r.stderr||"").trim()}`); }
+      did(`install and enable ${unit}.timer`); if (!DRY) { run("systemctl", ["--user", "daemon-reload"]); const r=run("systemctl", ["--user", "enable", "--now", `${unit}.timer`]); if(r.status!==0)warn(`systemd timer enable failed: ${(r.stderr||"").trim()}`); else record({kind:"service.load",name:`${unit}.timer`,path:homePath(path.join(userDir,`${unit}.timer`))}); }
     }
   } else note(agentSkipped ? "dispatch agent skipped; reporting CLI installed" : "service skipped (--no-jira-agent-service)");
   const envText = fs.existsSync(jira.envFile) ? fs.readFileSync(jira.envFile, "utf8") : "";

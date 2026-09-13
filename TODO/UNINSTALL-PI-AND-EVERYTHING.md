@@ -1,27 +1,31 @@
 # Uninstall: remove everything HABLO added, and nothing else
 
-> Status: phase A implemented; the uninstall command in phase B remains. The receipt is the
-> load-bearing idea and the rest follows from it. The artifact inventory has to
-> be re-read whenever a new subsystem ships, and the four documents that add one
-> are named in "Artifacts by subsystem".
+> Status: implemented 2026-09-13. The receipt remains the load-bearing idea;
+> the artifact inventory must be extended whenever a new subsystem ships.
 
 - [x] `install.mjs`: a `record()` helper every writing step calls, and the receipt writer
 - [x] Record the prior value for every merged key, so a revert can restore absence
 - [x] Record which global packages and scripts this installer actually installed
 - [x] Record a content hash per file written, so a hand-edited file can be detected later
-- [ ] `install.mjs`: the `uninstall` subcommand, plan-only unless `--yes`
-- [ ] The six scope flags plus `--all`
-- [ ] `--infer`: plan from `hablo.json` when the receipt is missing, refuse to run without `--yes --infer`
-- [ ] Phase 0: stop the services and daemons this installer started, before touching any file
-- [ ] Revert `settings.json` keys through a dotfiles symlink, never unlink it
-- [ ] Fold multiple runs newest-first so the oldest `prior` wins
-- [ ] Cut the `HABLO:*` blocks from `data/captain.md`, keep the rest of the file
-- [ ] Refuse to remove `~/firstmate` when it is dirty or unpushed; name the paths
-- [ ] Back up automatically before removing anything, unless `--no-backup`
-- [ ] The leftovers report: what stayed, and why
-- [ ] Cover the runtime artifacts `bin/hablo` writes into the firstmate checkout
+- [x] `install.mjs`: the `uninstall` subcommand, plan-only unless `--yes`
+- [x] The six scope flags plus `--all`
+- [x] `--infer`: plan from `hablo.json` when the receipt is missing, refuse to run without `--yes --infer`
+- [x] Phase 0: stop the services and daemons this installer started, before touching any file
+- [x] Revert `settings.json` keys through a dotfiles symlink, never unlink it
+- [x] Fold multiple runs newest-first so the oldest `prior` wins
+- [x] Cut the `HABLO:*` blocks from `data/captain.md`, keep the rest of the file
+- [x] Refuse to remove `~/firstmate` when it is dirty or unpushed; name the paths
+- [x] Back up automatically before removing anything, unless `--no-backup`
+- [x] The leftovers report: what stayed, and why
+- [x] Cover the runtime artifacts `bin/hablo` writes into the firstmate checkout
 - [x] `hablo.json`: the `receipt` block (path, retention)
-- [ ] `README.md`: replace the scattered undo snippets with one pointer
+- [x] `README.md`: replace the scattered undo snippets with one pointer
+
+Completed 2026-09-13. Fixture coverage exercises plan-only and confirmed
+execution, newest-hash/oldest-prior folding, writable, read-only, and dangling
+settings symlinks, changed credentials, automatic state backup, inferred mode,
+idempotent service shutdown, all optional scopes, broken and live runtime
+symlinks, receipt retention, and both detached and no-upstream firstmate clones.
 
 ## What this is
 
@@ -275,3 +279,11 @@ and the backup covers them first.
 4. **The hash check on a file the installer rewrites every run.** `bin/hablo` is
    re-stamped whenever the model or firstmate path changes, so the receipt's hash
    must come from the last run that wrote it, not the first.
+
+Verified 2026-09-13. An unloaded fake launchd unit can be stopped repeatedly;
+the systemd path implements the same ignored-not-loaded contract. JSON
+restoration writes through a live symlink and leaves read-only or dangling links
+untouched. A
+detached HEAD contained in its remote is accepted, while a branch without an
+upstream is named and refused. A wrapper rewritten by a later install is removed
+using that last run's hash while its JSON state restores the oldest prior value.

@@ -191,7 +191,7 @@
     }
   },
   "receipt": {
-    "$comment": "Install provenance consumed by the future uninstall command. Runs append atomically. retainRuns is reserved for phase B; phase A never discards the oldest prior value needed for a correct revert.",
+    "$comment": "Install provenance consumed by the uninstall command. Runs append atomically; before retainRuns is exceeded, old runs fold into one lossless baseline so the oldest prior value remains available.",
     "path": "~/.hablo/receipt.json",
     "retainRuns": 50
   },

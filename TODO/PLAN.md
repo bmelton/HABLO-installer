@@ -18,7 +18,7 @@
 - [ ] **Wave 3** [JIRA.md](JIRA.md) (19 of 19 implementation items complete; live Jira demo pending)
 - [ ] **Wave 3** [JIRA-AGENT.md](JIRA-AGENT.md) (21 of 21 implementation items complete; live Jira demo pending)
 - [x] **Wave 4** [DREAM.md](DREAM.md) (20 of 20 complete, installer step 14)
-- [ ] **Wave 5** [UNINSTALL-PI-AND-EVERYTHING.md](UNINSTALL-PI-AND-EVERYTHING.md) phase B: the command (11 of 17 items)
+- [x] **Wave 5** [UNINSTALL-PI-AND-EVERYTHING.md](UNINSTALL-PI-AND-EVERYTHING.md) phase B: the command (17 of 17 complete)
 
 Registry check on 2026-09-13: npm still has `pi-bedrouter@0.4.1` and
 `bedrouter@0.4.2`; `npm whoami` returns E401 on this machine. Publication
@@ -75,8 +75,8 @@ than replaces.
 
 Completed 2026-09-13. A fixture install covers a default run followed by
 `--nautical`, verifies hashes and merged-key provenance, and confirms the second
-run appends. Retention remains dormant until phase B can compact old runs without
-losing their original values.
+run appends. Wave 5 now folds older runs into a lossless baseline before
+enforcing receipt retention, preserving their original values.
 
 ## Wave 1: bedrouter, in this order
 

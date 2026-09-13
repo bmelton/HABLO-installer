@@ -61,39 +61,24 @@ Then: `pi --provider bedrouter --model auto`. For firstmate: `cd <your project> 
 
 ## Backup, uninstall, reinstall
 
-Each install appends its writes and package installations to `~/.hablo/receipt.json`, including prior JSON values and content hashes. This provenance is the input for the receipt-driven uninstall command planned in `TODO/UNINSTALL-PI-AND-EVERYTHING.md`; current uninstall instructions remain manual until that command ships.
+Each install appends its writes and package installations to `~/.hablo/receipt.json`, including prior JSON values and content hashes. Older runs fold into a lossless baseline before the configured retention limit is exceeded, so uninstall can still recover the value from before the first install.
 
 `node install.mjs backup` writes `~/hablo-backup-<timestamp>.tgz` containing the state that cannot be regenerated and does not live in dotfiles: `~/.pi/agent/auth.json` (OAuth logins), `trust.json`, and `~/.bedrouter/.env` + `bedrouter.json` if present. It also archives the config the installer or dotfiles would regenerate anyway (`settings.json`, `models.json`, `pi-bedrouter.json`, `workflows.json`, agent/workflow files, and HABLO's captain/tone extensions), following symlinks so the archive holds real content. Sessions, model caches and logs are **not** included unless you pass `--with-history`. `--restore <tgz>` puts entries back only where the destination is missing, so it is safe to run on a machine that already has some of it.
 
 What is *not* in `~/.pi` and therefore unaffected by any of this: `~/.aws` (SSO profiles and token cache), `~/.dotfiles`, project repositories and their `openwiki/` directories, and the firstmate clone.
 
-To uninstall Pi completely and rebuild it with this installer:
+Uninstall is plan-only unless `--yes` is present. The default reverses installer-created files, JSON keys, model-list entries, and marked firstmate policy blocks; it unloads the Jira and Dream services before removing their binaries. It never unlinks a dotfiles-managed settings symlink, removes a file whose installed hash has changed, or touches AWS, project repositories, Pi authentication, or trust state.
 
 ```sh
-# 1. back up (auth + trust + config; add --with-history if you want sessions)
-cd ~/projects/ai/HABLO-installer && node install.mjs backup
-
-# 2. remove Pi and its state
-which pi                                   # tells you how it was installed
-npm uninstall -g @earendil-works/pi-coding-agent   # or: bun remove -g @earendil-works/pi-coding-agent
-mv ~/.pi ~/.pi.old-$(date +%F)             # move, don't delete, until you're happy
-
-# 3. reinstall Pi — by hand, or let step 5 do it via --install-pi
-npm install -g @earendil-works/pi-coding-agent
-
-# 4. on a dotfiles-managed machine, put the config symlinks back FIRST so the installer writes through them
-cd ~/.dotfiles && stow -R pi
-
-# 5. rebuild everything, restoring auth and trust
-cd ~/projects/ai/HABLO-installer && ./install.sh --install-pi --restore ~/hablo-backup-<timestamp>.tgz
-
-# 6. verify, then clean up
-pi --list-models | grep -c bedrouter       # 7
-./install.sh --dry-run   # every line should read "already installed / present / up to date"
-rm -rf ~/.pi.old-*                         # when satisfied
+node install.mjs uninstall                         # inspect the default plan
+node install.mjs uninstall --yes                   # execute it; backs up first
+node install.mjs uninstall --all                   # inspect full removal
+node install.mjs uninstall --all --yes             # state, globals, firstmate and Pi too
 ```
 
-Step 4 matters on machines where `~/.pi/agent/settings.json` and friends are stow symlinks into `~/.dotfiles/pi`: with the links in place, the installer edits the dotfiles copy (it says so: "settings.json is a symlink … dotfiles-managed"), and `--restore` leaves those files alone because they already exist. Skip step 4 on a machine without dotfiles; the installer then creates plain files.
+The additional scopes are `--with-state`, `--with-globals`, `--with-firstmate`, `--with-services`, and `--remove-pi`; `--all` enables them together. Every execution backs up first unless `--no-backup` is explicit. `--with-firstmate` refuses a dirty clone, a local branch with no upstream or unpushed commits, an unsafe detached HEAD, or newer files under `data/`, while completing the other scopes. The final leftovers report names every changed, pre-existing, unsafe, or third-party artifact it kept.
+
+For an older installation without a receipt, `--infer` produces a reduced plan using only files carrying the exact `HABLO-installer` marker and marked policy blocks. Execution requires both `--yes --infer`; inferred mode never removes global tools, the firstmate clone, or Pi because their earlier ownership cannot be proven. `--receipt <path>` selects a non-default receipt.
 
 ## Before you run it: an AWS profile that can call Bedrock
 
@@ -258,15 +243,15 @@ bedrouter model later starts it when auto-start is enabled. Set
 
 `hablo` (`bin/hablo` here, copied to `~/.local/bin/hablo` with the firstmate directory stamped in) exports `FM_ROOT_OVERRIDE` and `FM_HOME` pointing at the firstmate checkout, prepends `<firstmate>/bin` to `PATH`, registers the project once in `data/projects.md` (mode `direct-PR`, or `HABLO_PROJECT_MODE`), symlinks `projects/<name>` to the directory so scripts that expect that spelling keep working, and starts Pi in the project with firstmate's four Pi extensions plus `~/.hablo/hablo-captain.ts` passed as `-e`. That extension appends firstmate's `AGENTS.md` to the system prompt on every turn, with the 58 relative `bin/fm-*.sh` invocations rewritten to absolute paths, and tells the captain which project the session is about. Run from inside the firstmate checkout, `hablo` is just `pi`. It needs bash 3.2+ (macOS's), `git`, and `pi` on `PATH`; it works the same on macOS, Linux and WSL and never needs root, which is why it lives in `~/.local/bin` rather than `/usr/local/bin` (the installer prints the `PATH` line if that directory is not on it).
 
-Step 11 installs the tools firstmate's session start otherwise lists as missing (`treehouse`, `no-mistakes`, `gh-axi`, `chrome-devtools-axi`, `lavish-axi`, `tasks-axi`, `quota-axi`), using exactly the commands firstmate's own `bin/fm-bootstrap.sh` prints for them. The two shell-script installs fetch the latest release from GitHub; they land in `~/.local/bin` (treehouse chooses it because it exists and is on PATH; no-mistakes is told to with `NO_MISTAKES_LINK_DIR`), so nothing asks for sudo. The `*-axi setup hooks` step those READMEs mention is skipped on purpose: it installs session hooks for Claude Code, Codex and OpenCode, which Pi does not read, and it writes outside `~/.pi`. Undo: `npm uninstall -g gh-axi chrome-devtools-axi lavish-axi tasks-axi quota-axi; rm -rf ~/.local/bin/treehouse ~/.local/bin/no-mistakes ~/.no-mistakes`.
+Step 11 installs the tools firstmate's session start otherwise lists as missing (`treehouse`, `no-mistakes`, `gh-axi`, `chrome-devtools-axi`, `lavish-axi`, `tasks-axi`, `quota-axi`), using exactly the commands firstmate's own `bin/fm-bootstrap.sh` prints for them. The two shell-script installs fetch the latest release from GitHub; they land in `~/.local/bin` (treehouse chooses it because it exists and is on PATH; no-mistakes is told to with `NO_MISTAKES_LINK_DIR`), so nothing asks for sudo. The `*-axi setup hooks` step those READMEs mention is skipped on purpose: it installs session hooks for Claude Code, Codex and OpenCode, which Pi does not read, and it writes outside `~/.pi`. Use `node install.mjs uninstall --with-globals` to inspect their receipt-backed removal plan.
 
-Undo for hablo and the tone policy: `rm ~/.local/bin/hablo ~/.hablo/hablo-captain.ts ~/.hablo/tone.md ~/.pi/agent/extensions/hablo-tone.ts`, then remove the marked `HABLO:TONE-POLICY` block from firstmate's `data/captain.md`. The registry lines it added to `data/projects.md` and the `projects/<name>` symlinks are runtime artifacts; prune them by hand when a project is retired.
+The default uninstall scope covers `hablo` and the tone-policy files and removes only HABLO's marked block from `data/captain.md`. It reports registry lines in `data/projects.md`, preserves live project symlinks, and prunes only broken runtime symlinks.
 
 ### OpenWiki for the whole crew
 
 `pi-openwiki-adapter` is installed as a global Pi package (step 2), so every Pi process firstmate spawns has the `openwiki_*` tools and the adapter's own system-prompt nudge ("use OpenWiki first as a table of contents") — no per-crewmate wiring is needed. Two things are needed for that to actually bite. First, the tools only see a wiki that is in the process's working directory: crewmates run in disposable git worktrees, so `openwiki/` must be committed to the project (it is documentation; only OpenWiki's run-state files belong in `.gitignore`). Second, the nudge is mild, so the installer writes a second marked block into `data/captain.md` (`firstmate/captain-openwiki-policy.md`, `--no-openwiki-policy` to skip): the captain runs `/openwiki doctor` at the start of work and offers `init`/`update` rather than running them silently, scouts with the wiki before dispatching and puts page names into briefs, includes wiki-first instructions verbatim in every crewmate's task text (orient with `openwiki_outline`/`openwiki_search`, trust code over wiki and report drift in the PR, never run updates in a worktree), and runs `/openwiki update` from the main checkout after a ticket merges.
 
-### What the installer changes in firstmate, and how to undo it
+### What the installer changes in firstmate
 
 Nothing tracked by firstmate's git repository is ever modified; `git status` inside the clone stays clean, which is what keeps `git pull --ff-only` working. The installer writes only these local, gitignored files, all of which firstmate itself designates as per-installation configuration:
 
@@ -277,14 +262,7 @@ Nothing tracked by firstmate's git repository is ever modified; `git status` ins
 | `config/backend` | only with `--backend` | firstmate auto-detects the backend (tmux) |
 | `data/captain.md` | unless its policy flag disables a block; created if absent, otherwise each marked block is appended and the rest of the file is left byte-for-byte | remove the corresponding `<!-- HABLO:*:START -->` … `END -->` block (or the file, if the installer created it) to drop that policy |
 
-Full undo:
-
-```sh
-cd ~/firstmate
-rm -f config/crew-harness config/crew-dispatch.json config/backend
-# then delete data/captain.md if the installer created it, or cut the HABLO block out of it
-git status        # still clean: nothing tracked was touched
-```
+The default receipt-driven uninstall reverses these files and blocks. Add `--with-firstmate` only when you also want the clone removed; the clone safety checks are described in [Backup, uninstall, reinstall](#backup-uninstall-reinstall).
 
 ## What it deliberately does not do
 
