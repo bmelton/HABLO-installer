@@ -12,6 +12,7 @@
 //                    [--skip-tools] [--update-tools]   firstmate's tool dependencies (treehouse, no-mistakes, *-axi)
 //                    [--skip-jira|--no-tracker] [--skip-jira-agent] [--jira-agent-interval <s>]
 //                    [--jira-agent-label <name>] [--no-jira-agent-service] [--jira-agent-bin-dir <dir>]
+//                    [--skip-dream] [--dream-at HH:MM] [--no-dream-service]
 //                    [--install-pi] [--pi-manager npm|bun|pnpm]   install the Pi CLI itself when it is missing
 //
 // Steps (each prints what it did or would do):
@@ -30,6 +31,7 @@
 //  11 tools       firstmate's tool dependencies: npm -g gh-axi chrome-devtools-axi lavish-axi tasks-axi quota-axi;
 //                 treehouse and no-mistakes via their install scripts into ~/.local/bin (no sudo)
 //  13 jira        build the reporting CLI and dispatch agent, render config, install and start the user scheduler
+//  14 dream       build the fleet correction digest, render config, install and start its daily timer
 import { execFileSync, spawnSync } from "node:child_process";
 import crypto from "node:crypto";
 import fs from "node:fs";
@@ -229,7 +231,7 @@ const awsBin = which("aws");
 note(awsBin ? `aws  ${run("aws", ["--version"]).stdout?.trim() || awsBin}` : "aws  MISSING - install the AWS CLI (brew install awscli) before the AWS step");
 note(which("git") ? "git  ok" : "git  MISSING (needed by OpenWiki freshness checks)");
 const goBin = which("go");
-note(goBin ? `go   ${run("go", ["version"]).stdout?.trim() || goBin}` : "go   MISSING (Jira binaries need Go 1.22+)");
+note(goBin ? `go   ${run("go", ["version"]).stdout?.trim() || goBin}` : "go   MISSING (Jira and Dream binaries need Go 1.22+; both steps will be skipped)");
 const owBin = which("openwiki");
 note(owBin ? `openwiki ${owBin}` : `openwiki not installed (optional):  npm install -g ${manifest.openwiki.npmPackage}   (Node ${manifest.openwiki.minNode}+)`);
 for (const [pkg, min] of Object.entries(manifest.pi.minVersions ?? {})) {
@@ -707,6 +709,49 @@ else {
   const envText = fs.existsSync(jira.envFile) ? fs.readFileSync(jira.envFile, "utf8") : "";
   if (jira.envVars.every((k) => new RegExp(`^${k}=.+$`, "m").test(envText)) && !DRY) { const r=run(path.join(jiraBinDir,"hablo-jira"),["doctor"]); note((r.stdout||r.stderr).trim()); }
   else note("jira: not configured. Add JIRA_URL, JIRA_EMAIL, and JIRA_API_TOKEN to ~/.hablo/jira/.env; create a token at https://id.atlassian.com/manage-profile/security/api-tokens");
+}
+
+// ---- 14 Dream correction digest and proposals -----------------------------------------------------------------------
+step(14, "Dream correction digest and rule proposals");
+const dream = structuredClone(manifest.dream ?? {});
+const dreamOff = flag("skip-dream") || dream.enabled === false;
+if (dreamOff) note(`skipped (${flag("skip-dream") ? "--skip-dream" : "dream.enabled=false"})`);
+else if (!goBin || !versionGte((run("go", ["version"]).stdout ?? "").match(/go(\d+\.\d+(?:\.\d+)?)/)?.[1] ?? "0", "1.22.0")) warn("Dream step skipped: Go 1.22+ is required (https://go.dev/dl/)");
+else {
+  const dreamHome = expand(dream.home);
+  const dreamBin = path.join(binDir, "hablo-dream");
+  const at = opt("dream-at", dream.service?.at ?? "03:00");
+  const atMatch = /^(\d\d?):(\d\d)$/.exec(at);
+  if (!atMatch || Number(atMatch[1]) > 23 || Number(atMatch[2]) > 59) fail(`--dream-at must be HH:MM (got ${at})`);
+  dream.home = dreamHome;
+  dream.service.at = `${atMatch[1].padStart(2, "0")}:${atMatch[2]}`;
+  dream.projects = (dream.projects ?? []).map(expand);
+  const existed = fs.existsSync(dreamHome);
+  if (!DRY) { fs.mkdirSync(dreamHome, { recursive: true, mode: 0o700 }); fs.mkdirSync(binDir, { recursive: true }); if (!existed) record({ kind: "dir.create", path: homePath(dreamHome), wasPresent: false }); }
+  did(`build ${dreamBin}`);
+  if (!DRY) {
+    const prior = fileState(dreamBin);
+    const r = run("go", ["build", "-trimpath", "-o", dreamBin, "./cmd/hablo-dream"], { cwd: path.join(here, "dream"), timeout: 600_000 });
+    if (r.status !== 0) warn(`could not build hablo-dream: ${(r.stderr || r.stdout).trim().split("\n")[0]}`);
+    else { fs.chmodSync(dreamBin, 0o755); record({ kind: prior.exists ? "file.update" : "file.create", path: homePath(dreamBin), sha256: sha256(fs.readFileSync(dreamBin)), ...(prior.sha256 ? { priorSha256: prior.sha256 } : {}) }); }
+  }
+  writeJson(path.join(dreamHome, "config.json"), dream);
+  did(`render ${path.join(dreamHome, "config.json")}`);
+  if (!flag("no-dream-service")) {
+    const hour = Number(atMatch[1]), minute = Number(atMatch[2]);
+    if (process.platform === "darwin") {
+      const label = dream.service.launchdLabel;
+      const plist = path.join(home, "Library", "LaunchAgents", `${label}.plist`);
+      const xml = `<?xml version="1.0" encoding="UTF-8"?>\n<!-- managed by HABLO -->\n<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">\n<plist version="1.0"><dict><key>Label</key><string>${label}</string><key>ProgramArguments</key><array><string>${dreamBin}</string><string>run</string></array><key>StartCalendarInterval</key><dict><key>Hour</key><integer>${hour}</integer><key>Minute</key><integer>${minute}</integer></dict><key>StandardOutPath</key><string>${path.join(dreamHome, "service.log")}</string><key>StandardErrorPath</key><string>${path.join(dreamHome, "service.log")}</string></dict></plist>\n`;
+      writeText(plist, xml); did(`install ${plist}`);
+      if (!DRY) { run("launchctl", ["bootout", `gui/${process.getuid()}/${label}`]); const r = run("launchctl", ["bootstrap", `gui/${process.getuid()}`, plist]); if (r.status !== 0) warn(`Dream launchctl bootstrap failed: ${(r.stderr || "").trim()}`); else record({ kind: "service.load", name: label, path: homePath(plist) }); }
+    } else if (process.platform === "linux") {
+      const unit = dream.service.systemdUnit, userDir = path.join(home, ".config", "systemd", "user");
+      writeText(path.join(userDir, `${unit}.service`), `[Unit]\nDescription=HABLO Dream correction digest\n[Service]\nType=oneshot\nExecStart=${dreamBin} run\n`);
+      writeText(path.join(userDir, `${unit}.timer`), `[Unit]\nDescription=Run HABLO Dream daily\n[Timer]\nOnCalendar=*-*-* ${dream.service.at}:00\nPersistent=true\n[Install]\nWantedBy=timers.target\n`);
+      did(`install and enable ${unit}.timer`); if (!DRY) { run("systemctl", ["--user", "daemon-reload"]); const r=run("systemctl", ["--user", "enable", "--now", `${unit}.timer`]); if(r.status!==0)warn(`Dream systemd timer enable failed: ${(r.stderr||"").trim()}`); else record({kind:"service.load",name:`${unit}.timer`,path:homePath(path.join(userDir,`${unit}.timer`))}); }
+    }
+  } else note("Dream service skipped (--no-dream-service)");
 }
 
 // ---- done ---------------------------------------------------------------------------------------------------------------

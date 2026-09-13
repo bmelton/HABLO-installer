@@ -17,7 +17,7 @@
 - [ ] **Wave 2** [DEPENDENCY-TRUST.md](DEPENDENCY-TRUST.md) (14 items)
 - [ ] **Wave 3** [JIRA.md](JIRA.md) (19 of 19 implementation items complete; live Jira demo pending)
 - [ ] **Wave 3** [JIRA-AGENT.md](JIRA-AGENT.md) (21 of 21 implementation items complete; live Jira demo pending)
-- [ ] **Wave 4** [DREAM.md](DREAM.md) (20 items, installer step 14)
+- [x] **Wave 4** [DREAM.md](DREAM.md) (20 of 20 complete, installer step 14)
 - [ ] **Wave 5** [UNINSTALL-PI-AND-EVERYTHING.md](UNINSTALL-PI-AND-EVERYTHING.md) phase B: the command (11 of 17 items)
 
 Registry check on 2026-09-13: npm still has `pi-bedrouter@0.4.1` and

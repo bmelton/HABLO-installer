@@ -48,6 +48,7 @@ function install(f, extra = []) {
     "--skip-agents",
     "--skip-tools",
     "--no-jira-agent-service",
+    "--no-dream-service",
     "--firstmate-dir", f.firstmate,
     "--bin-dir", path.join(f.home, ".local", "bin"),
     ...extra,
@@ -95,6 +96,11 @@ test("Wave 0 installs and disables tone policy while appending receipt runs", ()
     assert.ok(fs.existsSync(path.join(f.agentDir, "extensions", "hablo-tone.ts")));
     assert.ok(fs.existsSync(path.join(f.home, ".local", "bin", "hablo-jira")), installOutput);
     assert.ok(fs.existsSync(path.join(f.home, ".local", "bin", "hablo-jira-agent")), installOutput);
+    assert.ok(fs.existsSync(path.join(f.home, ".local", "bin", "hablo-dream")), installOutput);
+    const dreamConfig = JSON.parse(fs.readFileSync(path.join(f.home, ".hablo", "dream", "config.json"), "utf8"));
+    assert.equal(dreamConfig.enabled, true);
+    assert.equal(dreamConfig.model, "bedrouter/auto");
+    assert.equal(dreamConfig.home, path.join(f.home, ".hablo", "dream"));
     const jiraConfig = JSON.parse(fs.readFileSync(path.join(f.home, ".hablo", "jira", "config.json"), "utf8"));
     assert.equal(jiraConfig.enabled, true);
     assert.equal(jiraConfig.agent.enabled, true);
@@ -119,6 +125,7 @@ test("Wave 0 installs and disables tone policy while appending receipt runs", ()
     const archiveEntries = execFileSync("tar", ["-tzf", path.join(f.dir, archive)], { encoding: "utf8" });
     assert.match(archiveEntries, /\.hablo\/tone\.md/);
     assert.match(archiveEntries, /\.pi\/agent\/extensions\/hablo-tone\.ts/);
+    assert.match(archiveEntries, /\.hablo\/dream\/config\.json/);
     assert.doesNotMatch(archiveEntries, /\.hablo\/receipt\.json/);
 
     install(f, ["--nautical"]);

@@ -1,0 +1,9 @@
+version: '3'
+
+tasks:
+  test:
+    cmds: [go test ./...]
+  build:
+    cmds: [go build -trimpath -o dist/hablo-dream ./cmd/hablo-dream]
+  check:
+    cmds: [gofmt -w ., go test ./..., go vet ./...]

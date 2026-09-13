@@ -1,0 +1,23 @@
+{
+  "version": 1,
+  "generatedAt": "2026-09-13T12:00:00Z",
+  "since": "2026-09-11T12:00:00Z",
+  "clusters": [
+    {
+      "key": "text:edit files generated never no",
+      "kind": "human-correction",
+      "count": 1,
+      "evidence": [
+        {
+          "id": "session:user-2",
+          "key": "text:edit files generated never no",
+          "kind": "human-correction",
+          "source": "testdata/pi/correction.jsonl",
+          "project": "/work/project",
+          "quote": "Correction: No, never edit generated files.\nPrior response: I changed generated.go directly.",
+          "timestamp": "2026-09-12T09:05:00Z"
+        }
+      ]
+    }
+  ]
+}

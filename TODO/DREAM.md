@@ -1,34 +1,40 @@
 # DREAM: turn yesterday's corrections into tomorrow's rules
 
-> Status: buildable spec. Every decision below is settled unless it sits under
-> "Verify before you build". Phase 2 (GitHub review comments) is scoped but not
-> specified in detail, and is marked as such.
+> Status: implemented 2026-09-13, including the optional Phase 2 GitHub review
+> source. The verification findings are recorded below.
 >
 > This is the fleet-wide, scheduled job. The `/dream` skill on this machine is a
 > different thing with the same verb: interactive, one project, Claude Code
 > memory only. The boundary is in "Two dreams, one verb" below. This job never
 > writes a memory file.
 
-- [ ] `dream/`: Go module, `cmd/hablo-dream`, `internal/*` skeleton
-- [ ] `internal/pisession`: walk `~/.pi/agent/sessions/**/*.jsonl`, follow the id/parentId branch, skip compacted spans
-- [ ] `internal/ccsession`: walk `~/.claude/projects/<slug>/*.jsonl` and read `memory/*.md`
-- [ ] `internal/signal`: the five extractors below, each emitting evidence with a stable key
-- [ ] `internal/redact`: apply `secrets.patterns` from `~/.hablo/guard.json`, with a built-in fallback list
-- [ ] `internal/cluster`: exact keys for structured signals, normalized token-set keys for text
-- [ ] `internal/state`: dismissals, already-proposed fingerprints, last run
-- [ ] `digest`: deterministic, no model, writes `digest-<date>.json`
-- [ ] `run`: digest, render the brief, `pi -p`, capture stdout, validate, render the report
-- [ ] The proposal JSON schema, and a validator that rejects a proposal with no citation
-- [ ] `report`, `show <n>`, `dismiss <n> --reason`, `doctor`, `version`
-- [ ] `apply <n[,n…]>`: branch, edit, commit, `gh pr create`, one PR per target repository
-- [ ] Refuse to apply a proposal whose target is not a tracked file in a git repository
-- [ ] Golden tests: fixture transcripts in, fixed digest out, byte for byte
-- [ ] Add the `dream` block to `hablo.json`
-- [ ] `install.mjs`: build the binary, render `~/.hablo/dream/config.json`, install the launchd or systemd timer
-- [ ] Add `--skip-dream`, `--dream-at`, `--no-dream-service` and the usage header lines
-- [ ] Add the dream paths to `backup.config` and to the uninstall receipt
-- [ ] `README.md`: what it reads, what it proposes, how to accept one
-- [ ] Phase 2: `internal/github`, review comments and change requests as a sixth signal
+- [x] `dream/`: Go module, `cmd/hablo-dream`, `internal/*` skeleton
+- [x] `internal/pisession`: walk `~/.pi/agent/sessions/**/*.jsonl`, follow the id/parentId branch, skip compacted spans
+- [x] `internal/ccsession`: walk `~/.claude/projects/<slug>/*.jsonl` and read `memory/*.md`
+- [x] `internal/signal`: the five extractors below, each emitting evidence with a stable key
+- [x] `internal/redact`: apply `secrets.patterns` from `~/.hablo/guard.json`, with a built-in fallback list
+- [x] `internal/cluster`: exact keys for structured signals, normalized token-set keys for text
+- [x] `internal/state`: dismissals, already-proposed fingerprints, last run
+- [x] `digest`: deterministic, no model, writes `digest-<date>.json`
+- [x] `run`: digest, render the brief, `pi -p`, capture stdout, validate, render the report
+- [x] The proposal JSON schema, and a validator that rejects a proposal with no citation
+- [x] `report`, `show <n>`, `dismiss <n> --reason`, `doctor`, `version`
+- [x] `apply <n[,n…]>`: branch, edit, commit, `gh pr create`, one PR per target repository
+- [x] Refuse to apply a proposal whose target is not a tracked file in a git repository
+- [x] Golden tests: fixture transcripts in, fixed digest out, byte for byte
+- [x] Add the `dream` block to `hablo.json`
+- [x] `install.mjs`: build the binary, render `~/.hablo/dream/config.json`, install the launchd or systemd timer
+- [x] Add `--skip-dream`, `--dream-at`, `--no-dream-service` and the usage header lines
+- [x] Add the dream paths to `backup.config` and to the uninstall receipt
+- [x] `README.md`: what it reads, what it proposes, how to accept one
+- [x] Phase 2: `internal/github`, review comments and change requests as a sixth signal
+
+Completed 2026-09-13. Pi 0.85.1 was verified headlessly with
+`--no-session --no-tools`: print mode returned only the answer on stdout,
+required no TTY, and exited 1 for a bedrouter model failure. The v3 reader was
+checked against real session and compaction records, the redactor was exercised
+against a real month-long digest plus fallback-secret fixtures, and the fixed
+transcript fixture covers the compaction cutoff and byte-for-byte digest output.
 
 ## What this is
 
@@ -301,3 +307,10 @@ requires rather than adding an HTTP client and a second credential.
 5. **How often the correction openers fire.** Run `digest` over the last month by
    hand. If "no" matches half the user turns, the list is wrong and tuning it is
    cheaper than any other change to this design.
+
+Verified 2026-09-13: the one-month bounded run completed against the local Pi v3
+corpus. No correction opener fired in the configured HABLO-installer project,
+and no built-in credential form survived in the resulting digest. The Dream Pi
+session receives only the already-redacted brief and starts with no tools, no
+context files, and no saved session, so the print-mode guard has nothing to
+prompt for or deny.

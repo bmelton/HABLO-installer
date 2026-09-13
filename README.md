@@ -27,6 +27,7 @@ Idempotent: run it again any time; it only changes what differs and never overwr
 | 10 | Installs the `hablo` command, its captain extension, and the global plain-language extension, so a firstmate captain can be started from any project directory (see [hablo](#hablo-firstmate-from-any-project-directory)) | `~/.local/bin/hablo` (`--bin-dir`), `~/.hablo/`, `~/.pi/agent/extensions/` |
 | 11 | Installs the tools firstmate's bootstrap otherwise reports as `MISSING`: `gh-axi`, `chrome-devtools-axi`, `lavish-axi`, `tasks-axi`, `quota-axi` (`npm install -g`), and `treehouse`, `no-mistakes` (their own install scripts, into `~/.local/bin`, no sudo). Only what is absent; `--update-tools` reinstalls everything | npm's global prefix, `~/.local/bin`, `~/.no-mistakes/` |
 | 13 | Builds the Jira reporting CLI and labelled-ticket dispatch agent, renders their shared configuration, and installs a launchd agent or systemd user timer | `~/.local/bin/hablo-jira*`, `~/.hablo/jira/`, user service configuration |
+| 14 | Builds Dream, which distills recent corrections into reviewed rule proposals, renders its configuration, and installs a daily launchd or systemd timer | `~/.local/bin/hablo-dream`, `~/.hablo/dream/`, user service configuration |
 
 Then: `pi --provider bedrouter --model auto`. For firstmate: `cd <your project> && hablo` (or `cd ~/firstmate && pi`) — firstmate's `AGENTS.md` takes over the session, and it spawns crewmates as `pi --model bedrouter/auto` processes in tmux, routed explicitly by the dispatch file the installer writes. pi-bedrouter starts the server on first use, shows what served each request in the footer, and `/bedrouter status|probe|report`, `/openwiki doctor` work from inside Pi.
 
@@ -53,6 +54,8 @@ Then: `pi --provider bedrouter --model auto`. For firstmate: `cd <your project> 
 | `--skip-jira-agent` | Install Jira reporting but not the dispatch agent |
 | `--jira-agent-interval <seconds>` `--jira-agent-label <name>` | Override the dispatch poll interval or ready label |
 | `--no-jira-agent-service` `--jira-agent-bin-dir <dir>` | Build without activating the scheduler, or change the binary directory |
+| `--skip-dream` | Skip the Dream binary, configuration, and timer |
+| `--dream-at HH:MM` `--no-dream-service` | Set the daily local run time (default `03:00`), or install Dream without activating its timer |
 | `--force-agents` | Overwrite existing agent profiles / workflows with the bundled ones |
 | `--dry-run` | Print, don't write |
 
@@ -206,6 +209,24 @@ JIRA_API_TOKEN=...
 Run `hablo-jira doctor --key HABLO-123` to verify authentication and workflow transitions, then add `agent-ready` to an assigned ticket. Useful demo commands are `hablo-jira-agent tick --dry-run`, `hablo-jira-agent tick`, `hablo-jira-agent status`, and `tmux attach -t hablo-HABLO-123`. On macOS, stop automatic polling with `launchctl bootout gui/$UID/dev.hablo.jira-agent`; on Linux use `systemctl --user disable --now hablo-jira-agent.timer`.
 
 Ticket descriptions are untrusted prompts running with the developer account's local access. Use a dedicated/scoped Jira identity where possible, keep project mappings narrow, and retain `direct-PR` so a human reviews all changes. The Wave 2 guard will add another enforcement layer; Jira dispatch does not wait for it.
+
+## Dream: corrections into reviewed rules
+
+Step 14 installs `hablo-dream`, a fleet-wide scheduled job that reads recent Pi and Claude Code transcripts, Claude memory files, the guard audit log, and the current rules in the repositories listed under `dream.projects` in `hablo.json`. It deterministically extracts and redacts evidence first; only that bounded digest is sent to `pi -p --model bedrouter/auto`. It never writes a memory file and never edits a policy during a scheduled run.
+
+The daily result is a numbered Markdown report under `~/.hablo/dream/`. Inspect and act on it with:
+
+```sh
+hablo-dream doctor
+hablo-dream digest          # deterministic extraction only; no model call
+hablo-dream run             # digest, propose, validate, and render
+hablo-dream report
+hablo-dream show 3
+hablo-dream dismiss 3 --reason "this file is intentionally editable"
+hablo-dream apply 3,4       # tracked targets only; creates branches, commits, and PRs
+```
+
+Every model proposal must cite evidence from the digest and use a closed change kind. `apply` refuses untracked files, paths outside the repository, dirty worktrees, and manual-only changes. Proposals for the same repository share one `dream/<date>` branch and pull request; nothing is merged automatically. Enable the optional phase-2 GitHub review-comment source with `dream.sources.github` after `gh auth login`.
 
 ## hablo: firstmate from any project directory
 

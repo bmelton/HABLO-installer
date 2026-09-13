@@ -1,0 +1,6 @@
+{"type":"session","version":3,"id":"session-1","timestamp":"2026-09-12T09:00:00Z","cwd":"/work/project"}
+{"type":"message","id":"old-user","parentId":null,"timestamp":"2026-09-12T09:01:00Z","message":{"role":"user","content":[{"type":"text","text":"Build it."}]}}
+{"type":"message","id":"old-assistant","parentId":"old-user","timestamp":"2026-09-12T09:02:00Z","message":{"role":"assistant","content":[{"type":"text","text":"I edited generated.go."}]}}
+{"type":"compaction","id":"compact-1","parentId":"old-assistant","timestamp":"2026-09-12T09:03:00Z","summary":"Earlier work was compacted."}
+{"type":"message","id":"assistant-2","parentId":"compact-1","timestamp":"2026-09-12T09:04:00Z","message":{"role":"assistant","content":[{"type":"text","text":"I changed generated.go directly."}]}}
+{"type":"message","id":"user-2","parentId":"assistant-2","timestamp":"2026-09-12T09:05:00Z","message":{"role":"user","content":[{"type":"text","text":"No, never edit generated files."}]}}
