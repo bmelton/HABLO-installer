@@ -1,0 +1,32 @@
+version: '3'
+tasks:
+  build:
+    cmds:
+      - mkdir -p dist
+      - go build -trimpath -o dist/hablo-jira ./cmd/hablo-jira
+      - go build -trimpath -o dist/hablo-jira-agent ./cmd/hablo-jira-agent
+  test:
+    cmds: [go test ./...]
+  lint:
+    cmds: [go vet ./...]
+  install:
+    cmds:
+      - go build -trimpath -o ~/.local/bin/hablo-jira ./cmd/hablo-jira
+      - go build -trimpath -o ~/.local/bin/hablo-jira-agent ./cmd/hablo-jira-agent
+  secrets:
+    desc: Populate the Jira-only env file from the linked Infisical project
+    cmds:
+      - mkdir -p ~/.hablo/jira
+      - |
+        set -eu
+        target="$HOME/.hablo/jira/.env"
+        temporary="${target}.tmp.$$"
+        trap 'rm -f "$temporary"' EXIT HUP INT TERM
+        umask 077
+        : > "$temporary"
+        for name in JIRA_URL JIRA_EMAIL JIRA_API_TOKEN; do
+          value=$(infisical secrets get "$name" --plain --silent)
+          printf '%s=%s\n' "$name" "$value" >> "$temporary"
+        done
+        mv "$temporary" "$target"
+        trap - EXIT HUP INT TERM

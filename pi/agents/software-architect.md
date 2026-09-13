@@ -35,3 +35,5 @@ stalling.
 
 <!-- When automating: give this node a json schema like
      { spec: string, files: string[], open_questions: string[] } -->
+
+When a Jira key is present, save the specification and run `hablo-jira comment --key <KEY> --stage spec --body @<file> --quiet`. Reporting failure never blocks the work.

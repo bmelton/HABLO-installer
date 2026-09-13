@@ -1,14 +1,14 @@
 # Uninstall: remove everything HABLO added, and nothing else
 
-> Status: buildable spec. Every decision below is settled. The receipt is the
+> Status: phase A implemented; the uninstall command in phase B remains. The receipt is the
 > load-bearing idea and the rest follows from it. The artifact inventory has to
 > be re-read whenever a new subsystem ships, and the four documents that add one
 > are named in "Artifacts by subsystem".
 
-- [ ] `install.mjs`: a `record()` helper every writing step calls, and the receipt writer
-- [ ] Record the prior value for every merged key, so a revert can restore absence
-- [ ] Record which global packages and scripts this installer actually installed
-- [ ] Record a content hash per file written, so a hand-edited file can be detected later
+- [x] `install.mjs`: a `record()` helper every writing step calls, and the receipt writer
+- [x] Record the prior value for every merged key, so a revert can restore absence
+- [x] Record which global packages and scripts this installer actually installed
+- [x] Record a content hash per file written, so a hand-edited file can be detected later
 - [ ] `install.mjs`: the `uninstall` subcommand, plan-only unless `--yes`
 - [ ] The six scope flags plus `--all`
 - [ ] `--infer`: plan from `hablo.json` when the receipt is missing, refuse to run without `--yes --infer`
@@ -20,7 +20,7 @@
 - [ ] Back up automatically before removing anything, unless `--no-backup`
 - [ ] The leftovers report: what stayed, and why
 - [ ] Cover the runtime artifacts `bin/hablo` writes into the firstmate checkout
-- [ ] `hablo.json`: the `receipt` block (path, retention)
+- [x] `hablo.json`: the `receipt` block (path, retention)
 - [ ] `README.md`: replace the scattered undo snippets with one pointer
 
 ## What this is
@@ -92,12 +92,18 @@ away.
 `sha256` is what makes "changed since install" detectable. A file whose hash no
 longer matches is one somebody edited by hand, and it is reported and kept.
 
+Phase A writes the receipt atomically after every recorded action and uses mode
+0600. Restore runs are deliberately excluded: restored files belong to the
+backup, while actions after restore belong to the new install.
+
 **Decision: every run is appended, and uninstall folds them newest-first.** A
 key set by three runs reverts to what existed before the first, because the
 oldest recorded `prior` is the true one. Collapsing the receipt to current state
 would overwrite that value on the second run and leave the revert writing a
-guess. The cost is a growing file; `receipt.retainRuns` (default 50) trims the
-oldest, and trimming is recorded too.
+guess. The cost is a growing file. `receipt.retainRuns` is present in the
+manifest with a default of 50, but phase A does not enforce it: discarding the
+oldest run would discard the true `prior`. Phase B must compact those actions
+into a lossless baseline before it enables pruning.
 
 ## Artifacts by subsystem
 

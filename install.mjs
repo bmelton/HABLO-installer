@@ -3,13 +3,15 @@
 // Zero dependencies. Node 20+ to run; Node 22+ is required for OpenWiki itself (checked, not enforced).
 //
 //   node install.mjs backup [--to <dir>] [--with-history]   archive auth + trust (+ config; + sessions/caches/logs with the flag)
-//   node install.mjs [--profile <aws-profile>] [--ladder claude|oss] [--restore <tgz>] [--dry-run] [--optional] [--default-model]
-//                    (profile and ladder default to hablo.json "defaults": bedrouter / oss; AWS_PROFILE in the env also counts)
+//   node install.mjs [--profile <aws-profile>] [--restore <tgz>] [--dry-run] [--optional] [--default-model]
+//                    (profile defaults to hablo.json; AWS_PROFILE in the environment also counts)
 //                    [--skip-aws] [--skip-probe] [--skip-agents] [--force-agents] [--home <dir>]
 //                    [--skip-firstmate] [--firstmate-dir <dir>] [--backend tmux|herdr] [--no-branch-policy] [--base-branch <name>]
-//                    [--no-openwiki-policy]
+//                    [--no-openwiki-policy] [--nautical|--no-tone-policy]
 //                    [--skip-cli] [--bin-dir <dir>] [--cli-model <m>]   the `hablo` command (default ~/.local/bin) and its Pi extension
 //                    [--skip-tools] [--update-tools]   firstmate's tool dependencies (treehouse, no-mistakes, *-axi)
+//                    [--skip-jira|--no-tracker] [--skip-jira-agent] [--jira-agent-interval <s>]
+//                    [--jira-agent-label <name>] [--no-jira-agent-service] [--jira-agent-bin-dir <dir>]
 //                    [--install-pi] [--pi-manager npm|bun|pnpm]   install the Pi CLI itself when it is missing
 //
 // Steps (each prints what it did or would do):
@@ -17,18 +19,19 @@
 //   1 preflight   node, pi (installed globally with --install-pi when missing), aws, git; openwiki (advisory)
 //   2 packages    pi install npm:<pkg> for anything not yet in settings.json packages
 //   3 settings    enabledModels += bedrouter/*; a few UX settings; optional default model
-//   4 bedrouter   ~/.pi/agent/pi-bedrouter.json, ~/.bedrouter/.env and bedrouter.json (from the installed example)
+//   4 bedrouter   ~/.pi/agent/pi-bedrouter.json, ~/.bedrouter/.env and bedrouter.json (rendered from hablo.json)
 //   5 aws         profile present? -> aws sso login; absent -> run `aws configure sso --profile <p>` (interactive)
-//   6 probe       bedrouter doctor --probe; swap unentitled rungs for fallbacks from the manifest, drop the rest
+//   6 probe       probe each rung; try fallbacks, disable unavailable rungs, reconcile discoverable capabilities
 //   7 agents      agent profiles + workflows into ~/.pi (never overwrites without --force-agents)
 //   8 fit notes   pi-agents model notes into ~/.pi/agent/workflows.json
 //   9 firstmate   clone/update kunchenguid/firstmate; crew harness = pi; crew-dispatch.json routing every crewmate
-//                 through bedrouter; captain.md branch-per-Jira-ticket policy (integration branch from the manifest,
-//                 default develop); optional config/backend (--backend herdr)
-//  10 cli         `hablo`: launch a firstmate captain from any project directory (wrapper + ~/.hablo/hablo-captain.ts)
+//                 through bedrouter; captain.md branch, OpenWiki, and plain-language policies; optional config/backend
+//  10 cli         `hablo`: launch a firstmate captain from any project directory (wrapper + captain/tone extensions)
 //  11 tools       firstmate's tool dependencies: npm -g gh-axi chrome-devtools-axi lavish-axi tasks-axi quota-axi;
 //                 treehouse and no-mistakes via their install scripts into ~/.local/bin (no sudo)
+//  13 jira        build the reporting CLI and dispatch agent, render config, install and start the user scheduler
 import { execFileSync, spawnSync } from "node:child_process";
+import crypto from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -42,14 +45,13 @@ const opt = (n, d) => { const i = args.indexOf(`--${n}`); return i >= 0 && args[
 const DRY = flag("dry-run");
 const home = os.homedir();
 const expand = (p) => p.replace(/^~(?=$|\/)/, home);
+const homePath = (p) => p === home ? "~" : p.startsWith(home + path.sep) ? `~${p.slice(home.length)}` : p;
 const agentDir = process.env.PI_CODING_AGENT_DIR ?? path.join(home, ".pi", "agent");
 const piDir = path.dirname(agentDir);
 const brHome = expand(opt("home", manifest.bedrouter.home));
 const defaults = manifest.defaults ?? {};
-const ladderName = opt("ladder", defaults.ladder ?? "claude");
-const ladder = manifest.bedrouter.ladders[ladderName];
-if (!ladder) fail(`unknown --ladder ${ladderName}; choose one of ${Object.keys(manifest.bedrouter.ladders).join(", ")}`);
 const profile = opt("profile", process.env.AWS_PROFILE ?? defaults.profile ?? "");
+const toneEnabled = !flag("nautical") && !flag("no-tone-policy");
 const stamp = () => new Date().toISOString().replace(/[:T]/g, "-").slice(0, 16);
 
 const log = (s) => console.log(s);
@@ -61,11 +63,54 @@ function fail(msg) { console.error(`\nERROR: ${msg}`); process.exit(1); }
 const warnings = [];
 function warn(msg) { warnings.push(msg); note(`WARNING: ${msg}`); }
 const readJson = (p, fallback) => { try { return JSON.parse(fs.readFileSync(p, "utf8")); } catch { return fallback; } };
-function writeJson(p, obj) { if (DRY) return; fs.mkdirSync(path.dirname(p), { recursive: true }); fs.writeFileSync(p, JSON.stringify(obj, null, 2) + "\n"); }
-function writeText(p, text) { if (DRY) return; fs.mkdirSync(path.dirname(p), { recursive: true }); fs.writeFileSync(p, text); }
+const readJsonText = (text, fallback = null) => { try { return JSON.parse(text); } catch { return fallback; } };
+const sha256 = (value) => crypto.createHash("sha256").update(value).digest("hex");
+let receipt;
+let receiptRun;
+const receiptPath = expand(manifest.receipt?.path ?? "~/.hablo/receipt.json");
+function flushReceipt() {
+  if (DRY || !receipt || !receiptRun) return;
+  fs.mkdirSync(path.dirname(receiptPath), { recursive: true });
+  const tmp = `${receiptPath}.tmp-${process.pid}`;
+  fs.writeFileSync(tmp, JSON.stringify(receipt, null, 2) + "\n", { mode: 0o600 });
+  fs.chmodSync(tmp, 0o600);
+  fs.renameSync(tmp, receiptPath);
+}
+function record(action) {
+  if (DRY || !receiptRun) return;
+  receiptRun.actions.push(action);
+  flushReceipt();
+}
+function recordMany(actions) { for (const action of actions) record(action); }
+function fileState(p) {
+  try {
+    const stat = fs.lstatSync(p);
+    const content = stat.isDirectory() ? undefined : fs.readFileSync(p);
+    return { exists: true, sha256: content === undefined ? undefined : sha256(content) };
+  } catch { return { exists: false }; }
+}
+function writeText(p, text, options = {}) {
+  if (DRY) return;
+  const prior = fileState(p);
+  fs.mkdirSync(path.dirname(p), { recursive: true });
+  fs.writeFileSync(p, text);
+  if (options.record !== false) record({
+    kind: prior.exists ? "file.update" : "file.create",
+    path: homePath(p),
+    sha256: sha256(text),
+    ...(prior.sha256 ? { priorSha256: prior.sha256 } : {}),
+  });
+}
+function writeJson(p, obj, options) { writeText(p, JSON.stringify(obj, null, 2) + "\n", options); }
 const which = (cmd) => { const r = spawnSync(process.platform === "win32" ? "where" : "which", [cmd], { encoding: "utf8" }); return r.status === 0 ? r.stdout.trim().split("\n")[0] : undefined; };
 const run = (cmd, a, o = {}) => spawnSync(cmd, a, { encoding: "utf8", stdio: o.inherit ? "inherit" : "pipe", cwd: o.cwd, env: { ...process.env, ...o.env }, timeout: o.timeout ?? 300_000 });
 const semverGte = (v, min) => Number(String(v).replace(/^v/, "").split(".")[0]) >= min;
+const versionGte = (v, min) => {
+  const parts = (x) => String(x).replace(/^v/, "").split(/[.-]/).slice(0, 3).map((n) => Number(n) || 0);
+  const a = parts(v), b = parts(min);
+  for (let i = 0; i < 3; i++) { if (a[i] !== b[i]) return a[i] > b[i]; }
+  return true;
+};
 
 // ---- backup subcommand ------------------------------------------------------------------------------------------------
 if (args[0] === "backup") {
@@ -108,6 +153,23 @@ if (restoreFrom) {
   } else note("nothing to restore (everything already present)");
 }
 
+// Start the receipt after restore: restored files belong to the backup, while everything below is install provenance.
+if (!DRY) {
+  receipt = readJson(receiptPath, { version: 1, runs: [] });
+  if (receipt.version !== 1 || !Array.isArray(receipt.runs)) fail(`invalid receipt at ${receiptPath}`);
+  const rev = run("git", ["-C", here, "rev-parse", "--short", "HEAD"]);
+  const dirty = run("git", ["-C", here, "status", "--porcelain"]);
+  receiptRun = {
+    at: new Date().toISOString(),
+    installer: `HABLO-installer@${rev.status === 0 ? rev.stdout.trim() : "unknown"}${dirty.status === 0 && dirty.stdout.trim() ? "+dirty" : ""}`,
+    argv: [...args],
+    actions: [],
+  };
+  receipt.runs.push(receiptRun);
+  // retainRuns is intentionally not enforced until phase B can compact old runs without losing the oldest `prior`.
+  flushReceipt();
+}
+
 // ---- 1 preflight ---------------------------------------------------------------------------------------------
 step(1, "preflight");
 // Dangling symlinks under ~/.pi (a removed dotfiles package leaves settings.json -> nowhere) make Pi load nothing and
@@ -125,7 +187,11 @@ step(1, "preflight");
     }
   };
   walk(piDir);
-  for (const p of dangling) { did(`remove dangling symlink ${path.relative(home, p)} -> ${fs.readlinkSync(p)}`); if (!DRY) fs.unlinkSync(p); }
+  for (const p of dangling) {
+    const target = fs.readlinkSync(p);
+    did(`remove dangling symlink ${path.relative(home, p)} -> ${target}`);
+    if (!DRY) { fs.unlinkSync(p); record({ kind: "symlink.remove", path: homePath(p), target, preexisting: true }); }
+  }
   if (dangling.length) note("(these pointed at a dotfiles package that no longer exists; real files are written in their place)");
 }
 const nodeMajor = Number(process.versions.node.split(".")[0]);
@@ -141,6 +207,7 @@ if (!piBin && flag("install-pi")) {
   if (!DRY) {
     const r = run(cmd[0], cmd[1], { inherit: true, timeout: 600_000 });
     if (r.status !== 0) fail(`${cmd[0]} could not install ${cliPkg} (exit ${r.status}); on EACCES use a user-level global prefix (nvm, or \`npm config set prefix ~/.npm-global\`)`);
+    record({ kind: "pi.cli", name: cliPkg, manager: mgr, wasPresent: false });
     piBin = which("pi");
     if (!piBin) {
       // not on PATH yet: ask the manager where its global bin is, use it for this run, and say what to add permanently
@@ -161,8 +228,18 @@ note(piBin ? `pi   ${run("pi", ["--version"]).stdout?.trim() || piBin}` : `pi   
 const awsBin = which("aws");
 note(awsBin ? `aws  ${run("aws", ["--version"]).stdout?.trim() || awsBin}` : "aws  MISSING - install the AWS CLI (brew install awscli) before the AWS step");
 note(which("git") ? "git  ok" : "git  MISSING (needed by OpenWiki freshness checks)");
+const goBin = which("go");
+note(goBin ? `go   ${run("go", ["version"]).stdout?.trim() || goBin}` : "go   MISSING (Jira binaries need Go 1.22+)");
 const owBin = which("openwiki");
 note(owBin ? `openwiki ${owBin}` : `openwiki not installed (optional):  npm install -g ${manifest.openwiki.npmPackage}   (Node ${manifest.openwiki.minNode}+)`);
+for (const [pkg, min] of Object.entries(manifest.pi.minVersions ?? {})) {
+  if (pkg.startsWith("$")) continue;
+  const pkgPath = path.join(agentDir, "npm", "node_modules", pkg, "package.json");
+  const installedVersion = readJson(pkgPath, null)?.version;
+  if (!installedVersion) note(`${pkg} not installed yet (needs >= ${min}; step 2 will install it)`);
+  else if (versionGte(installedVersion, min)) note(`${pkg} ${installedVersion} (>= ${min})`);
+  else note(`${pkg} ${installedVersion} (needs >= ${min} for non-bedrouter voyages; until you update, --provider on any other provider is overridden at session start)`);
+}
 
 // ---- 2 packages ------------------------------------------------------------------------------------------------
 step(2, "pi packages");
@@ -186,31 +263,72 @@ for (const pkg of wanted) {
   if (!DRY) {
     const r = run("pi", ["install", pkg], { inherit: true });
     if (r.status !== 0) fail(`pi install ${pkg} failed (exit ${r.status})`);
+    record({ kind: "pi.package", name: pkg, wasListed: listed, wasOnDisk: onDisk });
   }
 }
 settings = readJson(settingsPath, settings); // pi install rewrites it
 
 // ---- 3 settings -------------------------------------------------------------------------------------------------
 step(3, "pi settings");
+const settingsExisted = fs.existsSync(settingsPath);
+const settingsActions = [];
 // Only extend an allowlist that already exists: creating one would hide every non-bedrouter provider.
 if (Array.isArray(settings.enabledModels)) {
+  const removedAutoOss = settings.enabledModels.includes("bedrouter/auto-oss");
+  settings.enabledModels = settings.enabledModels.filter((m) => m !== "bedrouter/auto-oss");
   const enabled = new Set(settings.enabledModels);
   const before = enabled.size;
   for (const m of manifest.pi.enabledModels) enabled.add(m);
-  if (enabled.size !== before) { settings.enabledModels = [...enabled]; did(`enabledModels += ${enabled.size - before} bedrouter models`); } else note("enabledModels already include bedrouter/*");
+  if (enabled.size !== before || removedAutoOss) {
+    const added = [...enabled].filter((m) => !settings.enabledModels.includes(m));
+    settings.enabledModels = [...enabled];
+    if (added.length) settingsActions.push({ kind: "json.append", path: homePath(settingsPath), key: "enabledModels", added });
+    if (removedAutoOss) settingsActions.push({ kind: "json.remove", path: homePath(settingsPath), key: "enabledModels", removed: ["bedrouter/auto-oss"] });
+    did(`refresh enabledModels (${added.length} added${removedAutoOss ? ", auto-oss removed" : ""})`);
+  } else note("enabledModels already include bedrouter/*");
 } else note("no enabledModels allowlist: all providers (bedrouter included) are visible; leaving it that way");
 try { if (fs.lstatSync(settingsPath).isSymbolicLink()) note(`settings.json is a symlink (${fs.readlinkSync(settingsPath)}): dotfiles-managed; writing through the link`); } catch { /* no file yet */ }
-for (const [k, v] of Object.entries(manifest.pi.settings)) if (settings[k] === undefined) { settings[k] = v; did(`settings.${k} = ${JSON.stringify(v)}`); }
-if (flag("default-model")) { settings.defaultProvider = "bedrouter"; settings.defaultModel = ladder.autoSelect; did(`default model = bedrouter/${ladder.autoSelect}`); }
-writeJson(settingsPath, settings);
+for (const [k, v] of Object.entries(manifest.pi.settings)) if (settings[k] === undefined) {
+  settings[k] = v;
+  settingsActions.push({ kind: "json.set", path: homePath(settingsPath), key: k, value: v, prior: null, priorPresent: false });
+  did(`settings.${k} = ${JSON.stringify(v)}`);
+}
+if (flag("default-model")) {
+  for (const [key, value] of [["defaultProvider", "bedrouter"], ["defaultModel", "auto"]]) {
+    if (settings[key] !== value) {
+      settingsActions.push({ kind: "json.set", path: homePath(settingsPath), key, value, prior: settings[key] ?? null, priorPresent: Object.hasOwn(settings, key) });
+      settings[key] = value;
+    }
+  }
+  did("default model = bedrouter/auto");
+}
+if (settingsActions.length) {
+  const settingsText = JSON.stringify(settings, null, 2) + "\n";
+  for (const action of settingsActions) action.sha256 = sha256(settingsText);
+  writeJson(settingsPath, settings, { record: false });
+  if (!settingsExisted) record({ kind: "file.create", path: homePath(settingsPath), sha256: sha256(settingsText) });
+  recordMany(settingsActions);
+}
 
 // ---- 4 bedrouter -------------------------------------------------------------------------------------------------
 step(4, "bedrouter");
 const pbPath = path.join(agentDir, "pi-bedrouter.json");
+const pbExisted = fs.existsSync(pbPath);
 const pb = readJson(pbPath, {});
-const pbNext = { ...pb, home: opt("home", manifest.bedrouter.home), port: manifest.bedrouter.port, autoSelect: ladder.autoSelect, debug: pb.debug ?? false, stopOnExit: pb.stopOnExit ?? "if-started-here" };
+const pbNext = { ...pb, home: opt("home", manifest.bedrouter.home), port: manifest.bedrouter.port, debug: pb.debug ?? false, stopOnExit: pb.stopOnExit ?? "if-started-here" };
 delete pbNext.path; // the binary comes from the npm dependency
-if (JSON.stringify(pb) !== JSON.stringify(pbNext)) { writeJson(pbPath, pbNext); did(`write ${pbPath} (autoSelect ${ladder.autoSelect}, home ${pbNext.home})`); } else note(`${pbPath} up to date`);
+delete pbNext.autoSelect; // 0.6 has one auto model and no per-family selection setting
+if (JSON.stringify(pb) !== JSON.stringify(pbNext)) {
+  const pbText = JSON.stringify(pbNext, null, 2) + "\n";
+  const actions = [];
+  for (const [key, value] of Object.entries(pbNext)) if (pb[key] !== value) actions.push({ kind: "json.set", path: homePath(pbPath), key, value, prior: pb[key] ?? null, priorPresent: Object.hasOwn(pb, key), sha256: sha256(pbText) });
+  if (Object.hasOwn(pb, "path")) actions.push({ kind: "json.delete", path: homePath(pbPath), key: "path", prior: pb.path, priorPresent: true, sha256: sha256(pbText) });
+  if (Object.hasOwn(pb, "autoSelect")) actions.push({ kind: "json.delete", path: homePath(pbPath), key: "autoSelect", prior: pb.autoSelect, priorPresent: true, sha256: sha256(pbText) });
+  writeJson(pbPath, pbNext, { record: false });
+  if (!pbExisted) record({ kind: "file.create", path: homePath(pbPath), sha256: sha256(pbText) });
+  recordMany(actions);
+  did(`write ${pbPath} (home ${pbNext.home}; migrated away autoSelect)`);
+} else note(`${pbPath} up to date`);
 
 const brPkg = path.join(agentDir, "npm", "node_modules", "bedrouter");
 const brCli = path.join(brPkg, "dist", "cli.js");
@@ -225,19 +343,28 @@ if (!fs.existsSync(envPath)) {
   const cur = fs.readFileSync(envPath, "utf8");
   if (profile && !new RegExp(`^AWS_PROFILE=${profile}$`, "m").test(cur)) {
     const next = /^AWS_PROFILE=/m.test(cur) ? cur.replace(/^AWS_PROFILE=.*$/m, `AWS_PROFILE=${profile}`) : `AWS_PROFILE=${profile}\n${cur}`;
-    writeText(envPath, next); did(`set AWS_PROFILE=${profile} in ${envPath}`);
+    writeText(envPath, next, { record: false });
+    record({ kind: "env.set", path: homePath(envPath), key: "AWS_PROFILE", value: profile, prior: cur.match(/^AWS_PROFILE=(.*)$/m)?.[1] ?? null, sha256: sha256(next) });
+    did(`set AWS_PROFILE=${profile} in ${envPath}`);
   } else note(`${envPath} present`);
 }
 const cfgPath = path.join(brHome, "bedrouter.json");
 let cfg = readJson(cfgPath, null);
-if (!cfg) {
-  const example = readJson(path.join(brPkg, "bedrouter.example.json"), null) ?? readJson(path.join(here, "bedrouter.example.json"), null);
-  if (!example) fail(`no bedrouter.example.json found under ${brPkg}`);
-  cfg = example;
-  cfg.routing = { ...cfg.routing, ...manifest.bedrouter.routing, classifier: { ...cfg.routing.classifier, ...manifest.bedrouter.routing.classifier } };
+if (cfg?.families) {
+  const backup = `${cfgPath}.pre-stack-${stamp()}`;
+  if (!DRY) {
+    fs.copyFileSync(cfgPath, backup);
+    record({ kind: "file.create", path: homePath(backup), sha256: sha256(fs.readFileSync(backup)) });
+  }
+  did(`back up legacy ladder config to ${backup}`);
+  cfg = null;
+}
+const renderedCfg = { stack: structuredClone(manifest.bedrouter.stack), aliases: {}, routing: structuredClone(manifest.bedrouter.routing) };
+if (!cfg || JSON.stringify(cfg) !== JSON.stringify(renderedCfg)) {
+  cfg = renderedCfg;
   writeJson(cfgPath, cfg);
-  did(`write ${cfgPath} from the package example (honorClientModel ${cfg.routing.honorClientModel}, classifier ${cfg.routing.classifier.model})`);
-} else note(`${cfgPath} present (${Object.entries(cfg.families).map(([f, r]) => `${f}: ${r.map((x) => x.alias).join(" > ")}`).join("; ")})`);
+  did(`render ${cfgPath} from hablo.json (${cfg.stack.length} rungs, classifier ${cfg.routing.classifier.model})`);
+} else note(`${cfgPath} present (${cfg.stack.map((r) => r.alias).join(" > ")})`);
 
 // ---- 5 aws ----------------------------------------------------------------------------------------------------------
 step(5, "aws credentials");
@@ -260,6 +387,15 @@ else {
   }
 }
 
+if (!flag("skip-aws") && !DRY && awsBin && profile) {
+  const form = run("aws", ["bedrock", "get-use-case-for-model-access", "--profile", profile, "--region", manifest.bedrouter.region, "--output", "json"]);
+  if (form.status === 0 && readJsonText(form.stdout)?.formData) note("Anthropic first-time use form is present");
+  else if (/ResourceNotFoundException|not found/i.test(`${form.stdout}\n${form.stderr}`)) {
+    note("Anthropic first-time use form is missing. Complete it in the Bedrock model catalog, or create anthropic-use-case.json and run:");
+    note(`aws bedrock put-use-case-for-model-access --form-data fileb://anthropic-use-case.json --profile ${profile} --region ${manifest.bedrouter.region}`);
+  } else note(`Anthropic use-form check unavailable (non-fatal): ${(form.stderr || form.stdout || "unknown error").trim().split("\n")[0]}`);
+}
+
 // ---- 6 probe ----------------------------------------------------------------------------------------------------------
 step(6, "entitlement probe (which rungs this account can invoke)");
 if (flag("skip-probe") || DRY) note(DRY ? "skipped in dry run" : "skipped (--skip-probe)");
@@ -271,37 +407,45 @@ function probeStep() {
   const denied = () => [...(out.stdout ?? "").matchAll(/^\s+DENIED\s+(\S+)\s+(\S+)/gm)].map((m) => ({ alias: m[1], id: m[2] }));
   let d = denied();
   let changed = false;
+  const triedByAlias = new Map();
   for (let round = 0; d.length && round < 4; round++) {
-    for (const { alias, id } of d) {
-      const fam = Object.keys(cfg.families).find((f) => cfg.families[f].some((r) => r.alias === alias));
-      const rung = cfg.families[fam].find((r) => r.alias === alias);
-      const tried = (rung._tried ??= [rung.bedrockId]);
+    for (const { alias } of d) {
+      const rung = cfg.stack.find((r) => r.alias === alias);
+      if (!rung) continue;
+      const tried = triedByAlias.get(alias) ?? [rung.bedrockId];
+      triedByAlias.set(alias, tried);
       const next = (manifest.bedrouter.fallbacks[tried[0]] ?? []).find((x) => !tried.includes(x));
       if (next) { note(`${alias}: ${rung.bedrockId} not entitled -> trying ${next}`); rung.bedrockId = next; tried.push(next); }
       else {
-        note(`${alias}: not entitled and no fallback left -> dropping the rung`);
-        cfg.families[fam] = cfg.families[fam].filter((r) => r.alias !== alias);
-        for (const [cls, a] of Object.entries(cfg.routing.classes?.[fam] ?? {})) if (a === alias) {
-          const remaining = cfg.families[fam];
-          const repl = cls === "explore" ? remaining[remaining.length - 1]?.alias : remaining[0]?.alias;
-          if (repl) { cfg.routing.classes[fam][cls] = repl; note(`  routing.classes.${fam}.${cls} -> ${repl}`); } else delete cfg.routing.classes[fam][cls];
-        }
-        for (const [k, v] of Object.entries(cfg.aliases ?? {})) if (v === alias) delete cfg.aliases[k];
-        if (cfg.routing.classifier?.model === alias) cfg.routing.classifier.model = cfg.families[fam][0]?.alias ?? Object.values(cfg.families).flat()[0].alias;
+        note(`${alias}: not entitled and no fallback left -> disabling the rung`);
+        rung.enabled = false;
+        if (cfg.routing.classifier?.model === alias) cfg.routing.classifier.model = cfg.stack.find((r) => r.enabled && r.serves.includes("trivial"))?.alias;
       }
       changed = true;
     }
-    for (const r of Object.values(cfg.families).flat()) delete r._tried;
     writeJson(cfgPath, cfg);
     out = probe();
     d = denied();
   }
-  for (const r of Object.values(cfg.families).flat()) delete r._tried;
+  for (const cls of ["trivial", "execute", "explore"]) if (!cfg.stack.some((r) => r.enabled && r.serves.includes(cls))) fail(`probe disabled the last rung serving ${cls}; enable or replace one in ${cfgPath}`);
+  if (awsBin && profile) for (const rung of cfg.stack.filter((r) => r.enabled)) {
+    const discoveryId = rung.bedrockId.replace(/^(us|eu|apac|global)\./, "");
+    const meta = run("aws", ["bedrock", "get-foundation-model", "--model-identifier", discoveryId, "--region", manifest.bedrouter.region, "--profile", profile, "--output", "json"]);
+    if (meta.status !== 0) continue;
+    const details = readJsonText(meta.stdout)?.modelDetails;
+    if (!details) continue;
+    const discovered = { streaming: !!details.responseStreamingSupported, imageInput: (details.inputModalities ?? []).includes("IMAGE") };
+    for (const [key, value] of Object.entries(discovered)) {
+      if (rung.capabilities[key] !== value) warn(`${rung.alias}: manifest capabilities.${key}=${rung.capabilities[key]} contradicts Bedrock discovery (${value}); using discovered value`);
+      rung.capabilities[key] = value;
+    }
+    changed = true;
+  }
   if (changed) writeJson(cfgPath, cfg);
   const okLines = (out.stdout ?? "").split("\n").filter((l) => /^\s+(ok|DENIED)/.test(l));
   note(okLines.join("\n  ") || (out.stdout ?? "").trim());
   if (d.length) note(`still unusable: ${d.map((x) => x.alias).join(", ")} - edit ${cfgPath} by hand`);
-  else note(`every rung in ${cfgPath} is entitled on this account`);
+  else note(`every enabled rung in ${cfgPath} is entitled on this account`);
 }
 
 // ---- 7 agents + workflows -------------------------------------------------------------------------------------------------
@@ -314,7 +458,7 @@ else {
       const s = path.join(src, name), t = path.join(dst, name);
       const existed = fs.existsSync(t);
       if (existed && !flag("force-agents")) { note(`${path.relative(home, t)} exists, kept (--force-agents to overwrite)`); continue; }
-      if (!DRY) { fs.mkdirSync(dst, { recursive: true }); fs.copyFileSync(s, t); }
+      if (!DRY) writeText(t, fs.readFileSync(s));
       did(`${existed ? "overwrite" : "install"} ${path.relative(home, t)}`);
     }
   };
@@ -325,18 +469,24 @@ else {
 // ---- 8 fit notes ------------------------------------------------------------------------------------------------------------
 step(8, "pi-agents model notes");
 const wfPath = path.join(agentDir, "workflows.json");
+const wfExisted = fs.existsSync(wfPath);
 const wf = readJson(wfPath, {});
 const notes = { ...(wf.models ?? {}) };
-const fam = ladder.family;
-for (const [alias, target] of Object.entries(cfg.aliases ?? {})) if (/^auto:/.test(target)) notes[`bedrouter/${alias}`] = target === `auto:${fam}` ? "DEFAULT for every node: bedrouter picks the cheapest adequate model per request and escalates on failure" : "bedrouter routes within this family; use only when the default family is unavailable";
-for (const [f, rungs] of Object.entries(cfg.families)) {
-  const classes = cfg.routing.classes?.[f] ?? {};
-  for (const r of rungs) {
-    const cls = Object.entries(classes).find(([, a]) => a === r.alias)?.[0];
-    notes[`bedrouter/${r.alias}`] = cls === "explore" ? "pin only for planning, final review, reduces" : cls === "trivial" ? "pin only for titles, summaries, extraction" : "pinned rung, bypasses routing; prefer bedrouter/auto";
-  }
-}
-if (JSON.stringify(wf.models ?? {}) !== JSON.stringify(notes)) { writeJson(wfPath, { ...wf, models: notes }); did(`write ${Object.keys(notes).length} model notes to ${wfPath}`); } else note("model notes up to date");
+const noteActions = [];
+delete notes["bedrouter/auto-oss"];
+if (Object.hasOwn(wf.models ?? {}, "bedrouter/auto-oss")) noteActions.push({ kind: "json.delete", path: homePath(wfPath), key: "models.bedrouter/auto-oss", prior: wf.models["bedrouter/auto-oss"], priorPresent: true });
+notes["bedrouter/auto"] = "DEFAULT for every node: bedrouter picks the first eligible model serving the request class and escalates on failure";
+for (const r of cfg.stack.filter((r) => r.enabled)) notes[`bedrouter/${r.alias}`] = r.serves.includes("explore") ? "pin only for planning or final review; ordinary work should use bedrouter/auto" : r.serves.includes("execute") ? "pin only when a node must bypass routing; ordinary implementation should use bedrouter/auto" : "pin only for titles, summaries, or extraction";
+for (const [key, value] of Object.entries(notes)) if (wf.models?.[key] !== value) noteActions.push({ kind: "json.set", path: homePath(wfPath), key: `models.${key}`, value, prior: wf.models?.[key] ?? null, priorPresent: Object.hasOwn(wf.models ?? {}, key) });
+if (noteActions.length) {
+  const next = { ...wf, models: notes };
+  const nextText = JSON.stringify(next, null, 2) + "\n";
+  for (const action of noteActions) action.sha256 = sha256(nextText);
+  writeJson(wfPath, next, { record: false });
+  if (!wfExisted) record({ kind: "file.create", path: homePath(wfPath), sha256: sha256(nextText) });
+  recordMany(noteActions);
+  did(`write ${Object.keys(notes).length} model notes to ${wfPath}`);
+} else note("model notes up to date");
 
 // ---- 9 firstmate --------------------------------------------------------------------------------------------------------------
 step(9, "firstmate (kunchenguid/firstmate)");
@@ -347,31 +497,39 @@ else {
   const missing = fm.requires.filter((c) => !which(c));
   if (missing.length) note(`missing: ${missing.join(", ")} (firstmate needs git + gh for its GitHub flows and tmux as the crew runtime; brew install ${missing.join(" ")})`);
   const ghAuth = which("gh") ? run("gh", ["auth", "status"]) : null;
-  if (ghAuth && ghAuth.status !== 0) note("gh is not authenticated: run `gh auth login` before the first voyage");
+  if (ghAuth && ghAuth.status !== 0) note("gh is not authenticated: run `gh auth login` before the first session");
   if (fs.existsSync(path.join(fmDir, ".git"))) {
+    const before = run("git", ["-C", fmDir, "rev-parse", "HEAD"]).stdout?.trim();
     did(`git -C ${fmDir} pull --ff-only`);
-    if (!DRY) { const r = run("git", ["-C", fmDir, "pull", "--ff-only"]); note(r.status === 0 ? (r.stdout.trim().split("\n").pop() ?? "updated") : `pull failed (${(r.stderr || "").trim().split("\n")[0]}); left as is`); }
+    if (!DRY) {
+      const r = run("git", ["-C", fmDir, "pull", "--ff-only"]);
+      const after = run("git", ["-C", fmDir, "rev-parse", "HEAD"]).stdout?.trim();
+      if (r.status === 0 && before && after && before !== after) record({ kind: "git.update", path: homePath(fmDir), from: before, to: after });
+      note(r.status === 0 ? (r.stdout.trim().split("\n").pop() ?? "updated") : `pull failed (${(r.stderr || "").trim().split("\n")[0]}); left as is`);
+    }
   } else if (fs.existsSync(fmDir)) note(`${fmDir} exists but is not a git checkout; skipping (use --firstmate-dir to pick another location)`);
   else {
     did(`git clone ${fm.repo} ${fmDir}`);
-    if (!DRY) { const r = run("git", ["clone", "--quiet", fm.repo, fmDir], { inherit: true, timeout: 600_000 }); if (r.status !== 0) note("clone failed; firstmate step incomplete"); }
+    if (!DRY) {
+      const r = run("git", ["clone", "--quiet", fm.repo, fmDir], { inherit: true, timeout: 600_000 });
+      if (r.status !== 0) note("clone failed; firstmate step incomplete");
+      else record({ kind: "git.clone", path: homePath(fmDir), repo: fm.repo });
+    }
   }
   if (fs.existsSync(fmDir) || DRY) {
-    // Crewmates inherit Pi's default model (fm-spawn.sh runs `pi -e <ext> "<brief>"` with no model flag): pin the crew
-    // harness to pi and, unless --default-model was given, say what that means for routing.
+    // The dispatch names the Pi harness. The captain's per-voyage system-prompt block supplies the exact provider/id
+    // string that firstmate passes as --model, so separate voyages never share model state on disk.
     const chPath = path.join(fmDir, "config", "crew-harness");
     const cur = fs.existsSync(chPath) ? fs.readFileSync(chPath, "utf8").trim() : "";
     if (cur !== fm.crewHarness) { writeText(chPath, fm.crewHarness + "\n"); did(`write ${path.relative(home, chPath)} = ${fm.crewHarness}`); } else note(`crew harness already ${cur}`);
-    // Dispatch profiles: every crewmate/scout is `pi --model bedrouter/<auto>`, explicitly, so routing does not depend on
-    // Pi's default model. (When this file exists fm-spawn refuses any spawn without a resolved harness, by design.)
-    const model = `bedrouter/${ladder.autoSelect}`;
-    const dispatch = fs.readFileSync(path.join(here, fm.crewDispatch), "utf8").replace(/__MODEL__/g, model);
+    // When this file exists fm-spawn refuses any spawn without a resolved harness, by design.
+    const dispatch = fs.readFileSync(path.join(here, fm.crewDispatch), "utf8");
     const dispatchPath = path.join(fmDir, "config", "crew-dispatch.json");
     const curDispatch = fs.existsSync(dispatchPath) ? fs.readFileSync(dispatchPath, "utf8") : "";
     if (curDispatch !== dispatch) {
       if (curDispatch && !/HABLO-installer/.test(curDispatch)) note(`${path.relative(home, dispatchPath)} exists and was not written by this installer; leaving it (delete it to adopt the HABLO one)`);
-      else { writeText(dispatchPath, dispatch); did(`write ${path.relative(home, dispatchPath)}: every crewmate -> pi + ${model}`); }
-    } else note(`crew dispatch already routes every crewmate through ${model}`);
+      else { writeText(dispatchPath, dispatch); did(`write ${path.relative(home, dispatchPath)}: every crewmate inherits the captain's provider/model through its brief`); }
+    } else note("crew dispatch already inherits the captain's provider/model");
     if (!which("jq")) note("jq is required by firstmate to validate crew-dispatch.json (brew install jq)");
     // Backend
     const backend = opt("backend", fm.backend);
@@ -386,8 +544,23 @@ else {
     const captainBlock = (marker, text, label) => {
       const cur = fs.existsSync(capPath) ? fs.readFileSync(capPath, "utf8") : "";
       const block = new RegExp(`<!-- HABLO:${marker}:START -->[\\s\\S]*?<!-- HABLO:${marker}:END -->\\n?`);
+      const prior = cur.match(block)?.[0] ?? null;
       const next = block.test(cur) ? cur.replace(block, text) : (cur ? cur.replace(/\s*$/, "\n\n") : "# Captain preferences\n\n") + text;
-      if (next !== cur) { writeText(capPath, next); did(`${cur ? "update" : "write"} ${path.relative(home, capPath)}: ${label}`); } else note(`captain.md ${label} up to date`);
+      if (next !== cur) {
+        writeText(capPath, next, { record: false });
+        record({ kind: prior ? "block.update" : "block.insert", path: homePath(capPath), marker: `HABLO:${marker}`, fileCreated: !cur, sha256: sha256(next), blockSha256: sha256(text), ...(prior ? { priorSha256: sha256(prior) } : {}) });
+        did(`${cur ? "update" : "write"} ${path.relative(home, capPath)}: ${label}`);
+      } else note(`captain.md ${label} up to date`);
+    };
+    const removeCaptainBlock = (marker, label) => {
+      const cur = fs.existsSync(capPath) ? fs.readFileSync(capPath, "utf8") : "";
+      const block = new RegExp(`<!-- HABLO:${marker}:START -->[\\s\\S]*?<!-- HABLO:${marker}:END -->\\n?`);
+      const found = cur.match(block)?.[0];
+      if (!found) { note(`captain.md ${label} absent`); return; }
+      const next = cur.replace(block, "").replace(/\n{3,}/g, "\n\n");
+      writeText(capPath, next, { record: false });
+      record({ kind: "block.remove", path: homePath(capPath), marker: `HABLO:${marker}`, priorSha256: sha256(found), sha256: sha256(next) });
+      did(`remove ${path.relative(home, capPath)}: ${label}`);
     };
     if (!flag("no-branch-policy")) {
       const base = opt("base-branch", fm.baseBranch);
@@ -396,6 +569,10 @@ else {
     // OpenWiki: pi-openwiki-adapter is a global Pi package, so every crewmate has the tools; the policy makes the
     // captain scout with the wiki, put wiki-first instructions in every brief, and keep the wiki updated.
     if (!flag("no-openwiki-policy")) captainBlock("OPENWIKI-POLICY", fs.readFileSync(path.join(here, fm.openwikiPolicy), "utf8").trim() + "\n", "OpenWiki-first policy");
+    if (!flag("no-tracker") && !flag("skip-jira")) captainBlock("TICKET-POLICY", fs.readFileSync(path.join(here, fm.ticketPolicy), "utf8").trim() + "\n", "Jira reporting policy");
+    else removeCaptainBlock("TICKET-POLICY", "Jira reporting policy");
+    if (toneEnabled) captainBlock("TONE-POLICY", fs.readFileSync(path.join(here, fm.tonePolicy), "utf8").trim() + "\n", "plain talk policy");
+    else removeCaptainBlock("TONE-POLICY", "plain talk policy");
   }
 }
 
@@ -417,10 +594,27 @@ else {
     if (!DRY) fs.chmodSync(dst, mode);
     did(`${cur === null ? "install" : "update"} ${path.relative(home, dst)}`);
   };
-  const cliModel = opt("cli-model", cli.model ?? ladder.autoSelect);
+  const cliModel = opt("cli-model", cli.model ?? "auto");
   installFile(path.join(here, "bin", "hablo"), path.join(binDir, "hablo"), (t) => t.replace(/__FM_ROOT__/g, fmDir).replace(/__HABLO_HOME__/g, habloHome).replace(/__PROVIDER__/g, cli.provider).replace(/__MODEL__/g, cliModel), 0o755);
   note(`hablo defaults to --provider ${cli.provider} --model ${cliModel} (HABLO_PROVIDER / HABLO_MODEL or your own flags override)`);
   installFile(path.join(here, "pi", "extensions", "hablo-captain.ts"), path.join(habloHome, "hablo-captain.ts"), (t) => t, 0o644);
+  const tonePath = path.join(habloHome, "tone.md");
+  if (toneEnabled) {
+    const source = fs.readFileSync(path.join(here, fm.tonePolicy), "utf8");
+    const inner = source.match(/<!-- HABLO:TONE-RULE:START -->[\s\S]*?<!-- HABLO:TONE-RULE:END -->/)?.[0];
+    if (!inner) fail(`tone rule markers missing from ${fm.tonePolicy}`);
+    const next = inner.trim() + "\n";
+    const existed = fs.existsSync(tonePath);
+    if (!existed || fs.readFileSync(tonePath, "utf8") !== next) { writeText(tonePath, next); did(`${existed ? "update" : "install"} ${path.relative(home, tonePath)}`); }
+    else note(`${path.relative(home, tonePath)} up to date`);
+  } else if (fs.existsSync(tonePath)) {
+    const cur = fs.readFileSync(tonePath, "utf8");
+    if (/HABLO:TONE-RULE:START/.test(cur)) {
+      if (!DRY) { fs.unlinkSync(tonePath); record({ kind: "file.remove", path: homePath(tonePath), priorSha256: sha256(cur) }); }
+      did(`remove ${path.relative(home, tonePath)} (${flag("nautical") ? "--nautical" : "--no-tone-policy"})`);
+    } else note(`${path.relative(home, tonePath)} was not written by this installer; leaving it`);
+  }
+  installFile(path.join(here, "pi", "extensions", "hablo-tone.ts"), path.join(agentDir, "extensions", "hablo-tone.ts"), (t) => t, 0o644);
   const onPath = (process.env.PATH ?? "").split(path.delimiter).some((d) => d && path.resolve(expand(d)) === path.resolve(binDir));
   if (!onPath) note(`${binDir} is not on your PATH; add this to your shell rc:\n         export PATH="${binDir.replace(home, "$HOME")}:$PATH"`);
   for (const ext of ["fm-primary-turnend-guard.ts", "fm-primary-pi-watch.ts"]) if (fs.existsSync(fmDir) && !fs.existsSync(path.join(fmDir, ".pi", "extensions", ext))) note(`firstmate has no .pi/extensions/${ext} (upstream layout changed?); hablo skips missing extensions but the captain may lack supervision`);
@@ -438,26 +632,84 @@ else {
   const childPath = (process.env.PATH ?? "").split(path.delimiter).includes(binDir) ? process.env.PATH : `${binDir}${path.delimiter}${process.env.PATH ?? ""}`;
   const ver = (t) => (run(t, ["--version"], { env: { PATH: childPath }, timeout: 20_000 }).stdout ?? "").trim().split("\n")[0];
   const present = (t) => !!spawnSync("sh", ["-c", `command -v ${t}`], { encoding: "utf8", env: { ...process.env, PATH: childPath } }).stdout.trim();
-  const npmMissing = tools.npm.filter((t) => upd || !present(t));
+  const npmPresence = Object.fromEntries(tools.npm.map((t) => [t, present(t)]));
+  const npmMissing = tools.npm.filter((t) => upd || !npmPresence[t]);
   for (const t of tools.npm.filter((t) => !npmMissing.includes(t))) note(`${t} present (${ver(t) || "version unknown"})`);
   if (npmMissing.length) {
     did(`npm install -g ${npmMissing.join(" ")}`);
-    if (!DRY) { const r = run("npm", ["install", "-g", ...npmMissing], { inherit: true, timeout: 600_000 }); if (r.status !== 0) warn(`npm install -g ${npmMissing.join(" ")} failed (exit ${r.status}); firstmate will report them as MISSING`); }
+    if (!DRY) {
+      const r = run("npm", ["install", "-g", ...npmMissing], { inherit: true, timeout: 600_000 });
+      if (r.status !== 0) warn(`npm install -g ${npmMissing.join(" ")} failed (exit ${r.status}); firstmate will report them as MISSING`);
+      else for (const t of npmMissing) record({ kind: "npm.global", name: t, wasPresent: npmPresence[t] });
+    }
   }
   for (const [t, url] of Object.entries(tools.scripts)) {
     if (present(t) && !upd) { note(`${t} present (${ver(t) || "version unknown"})`); continue; }
     if (!which("curl")) { warn(`curl is missing; cannot install ${t} (${url})`); continue; }
     did(`curl -fsSL ${url} | sh      (installs into ${binDir})`);
     if (!DRY) {
+      const wasPresent = present(t);
       const env = { PATH: childPath, NO_MISTAKES_LINK_DIR: binDir };
       const r = spawnSync("sh", ["-c", `curl -fsSL "${url}" | sh`], { stdio: "inherit", env: { ...process.env, ...env }, timeout: 600_000 });
       if (r.status !== 0 || !present(t)) warn(`${t} install did not complete (exit ${r.status}); run it by hand:  curl -fsSL ${url} | sh`);
+      else record({ kind: "script.install", name: t, source: url, wasPresent });
     }
   }
   note("(the *-axi `setup hooks` step is not run: it installs Claude Code/Codex/OpenCode session hooks, which Pi does not use)");
 }
 
+// ---- 13 Jira reporting and dispatch -------------------------------------------------------------------------------------
+step(13, "Jira reporting and labelled-ticket dispatch");
+const jira = structuredClone(manifest.jira ?? {});
+const jiraOff = flag("skip-jira") || flag("no-tracker") || jira.enabled === false;
+if (jiraOff) note(`skipped (${flag("no-tracker") ? "--no-tracker" : flag("skip-jira") ? "--skip-jira" : "jira.enabled=false"})`);
+else if (!goBin || !versionGte((run("go", ["version"]).stdout ?? "").match(/go(\d+\.\d+(?:\.\d+)?)/)?.[1] ?? "0", "1.22.0")) warn("Jira step skipped: Go 1.22+ is required (https://go.dev/dl/)");
+else {
+  const jiraHome = expand(jira.home);
+  const jiraBinDir = expand(opt("jira-agent-bin-dir", manifest.cli.binDir));
+  const agentSkipped = flag("skip-jira-agent") || jira.agent?.enabled === false;
+  if (opt("jira-agent-interval", "")) jira.agent.intervalSeconds = Number(opt("jira-agent-interval", jira.agent.intervalSeconds));
+  if (opt("jira-agent-label", "")) jira.agent.labels.ready = opt("jira-agent-label", jira.agent.labels.ready);
+  jira.home = jiraHome;
+  jira.envFile = expand(jira.envFile);
+  for (const p of Object.values(jira.projects ?? {})) {
+    p.dir = expand(p.dir);
+    if (!fs.existsSync(p.dir)) note(`mapped Jira repository is not cloned yet: ${p.dir}`);
+  }
+  const jiraHomeExisted = fs.existsSync(jiraHome);
+  if (!DRY) { fs.mkdirSync(jiraBinDir, { recursive: true }); fs.mkdirSync(path.join(jiraHome, "log"), { recursive: true, mode: 0o700 }); fs.mkdirSync(path.join(jiraHome, "runs"), { recursive: true, mode: 0o700 }); if (!jiraHomeExisted) record({ kind: "dir.create", path: homePath(jiraHome), wasPresent: false }); }
+  const builds = [["hablo-jira", "./cmd/hablo-jira"], ...(!agentSkipped ? [[jira.agent.binName ?? "hablo-jira-agent", "./cmd/hablo-jira-agent"]] : [])];
+  for (const [name, pkg] of builds) {
+    const dst = path.join(jiraBinDir, name); did(`build ${dst}`);
+    if (!DRY) { const prior=fileState(dst); const r = run("go", ["build", "-trimpath", "-o", dst, pkg], { cwd: path.join(here, "jira"), timeout: 600_000 }); if (r.status !== 0) { warn(`could not build ${name}: ${(r.stderr || r.stdout).trim().split("\n")[0]}`); continue; } fs.chmodSync(dst, 0o755); record({ kind: prior.exists ? "file.update" : "file.create", path: homePath(dst), sha256: sha256(fs.readFileSync(dst)), ...(prior.sha256 ? { priorSha256: prior.sha256 } : {}) }); }
+  }
+  writeJson(path.join(jiraHome, "config.json"), jira);
+  did(`render ${path.join(jiraHome, "config.json")}`);
+  const templateDst = path.join(jiraHome, "brief.tmpl.md");
+  if (!fs.existsSync(templateDst) || /HABLO|Work Jira ticket/.test(fs.readFileSync(templateDst, "utf8"))) { writeText(templateDst, fs.readFileSync(path.join(here, "jira", "brief.tmpl.md"), "utf8")); did(`install ${templateDst}`); }
+  else note(`${templateDst} is hand-edited; leaving it`);
+  if (!fs.existsSync(jira.envFile)) { writeText(jira.envFile, fs.readFileSync(path.join(here, "jira", "env.example"), "utf8")); if (!DRY) fs.chmodSync(jira.envFile, 0o600); did(`create ${jira.envFile} (mode 0600)`); }
+  const agentBin = path.join(jiraBinDir, jira.agent.binName ?? "hablo-jira-agent");
+  if (!agentSkipped && !flag("no-jira-agent-service")) {
+    if (process.platform === "darwin") {
+      const label = jira.agent.service.launchdLabel;
+      const plist = path.join(home, "Library", "LaunchAgents", `${label}.plist`);
+      const xml = `<?xml version="1.0" encoding="UTF-8"?>\n<!-- managed by HABLO -->\n<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">\n<plist version="1.0"><dict><key>Label</key><string>${label}</string><key>ProgramArguments</key><array><string>${agentBin}</string><string>tick</string></array><key>StartInterval</key><integer>${jira.agent.intervalSeconds}</integer><key>RunAtLoad</key><true/><key>StandardOutPath</key><string>${path.join(jiraHome, "log", "launchd.log")}</string><key>StandardErrorPath</key><string>${path.join(jiraHome, "log", "launchd.log")}</string></dict></plist>\n`;
+      writeText(plist, xml); did(`install ${plist}`);
+      if (!DRY) { run("launchctl", ["bootout", `gui/${process.getuid()}/${label}`]); const r = run("launchctl", ["bootstrap", `gui/${process.getuid()}`, plist]); if (r.status !== 0) warn(`launchctl bootstrap failed: ${(r.stderr || "").trim()}`); else record({ kind: "service.load", name: label, path: homePath(plist) }); }
+    } else if (process.platform === "linux") {
+      const unit = jira.agent.service.systemdUnit; const userDir = path.join(home, ".config", "systemd", "user");
+      writeText(path.join(userDir, `${unit}.service`), `[Unit]\nDescription=HABLO Jira agent\n[Service]\nType=oneshot\nExecStart=${agentBin} tick\n`);
+      writeText(path.join(userDir, `${unit}.timer`), `[Unit]\nDescription=Poll Jira for HABLO work\n[Timer]\nOnBootSec=1min\nOnUnitActiveSec=${jira.agent.intervalSeconds}s\nAccuracySec=1s\n[Install]\nWantedBy=timers.target\n`);
+      did(`install and enable ${unit}.timer`); if (!DRY) { run("systemctl", ["--user", "daemon-reload"]); const r=run("systemctl", ["--user", "enable", "--now", `${unit}.timer`]); if(r.status!==0)warn(`systemd timer enable failed: ${(r.stderr||"").trim()}`); }
+    }
+  } else note(agentSkipped ? "dispatch agent skipped; reporting CLI installed" : "service skipped (--no-jira-agent-service)");
+  const envText = fs.existsSync(jira.envFile) ? fs.readFileSync(jira.envFile, "utf8") : "";
+  if (jira.envVars.every((k) => new RegExp(`^${k}=.+$`, "m").test(envText)) && !DRY) { const r=run(path.join(jiraBinDir,"hablo-jira"),["doctor"]); note((r.stdout||r.stderr).trim()); }
+  else note("jira: not configured. Add JIRA_URL, JIRA_EMAIL, and JIRA_API_TOKEN to ~/.hablo/jira/.env; create a token at https://id.atlassian.com/manage-profile/security/api-tokens");
+}
+
 // ---- done ---------------------------------------------------------------------------------------------------------------
 log(`\nDone${DRY ? " (dry run; nothing written)" : ""}${warnings.length ? ` with ${warnings.length} warning(s):\n  - ${warnings.join("\n  - ")}` : ""}.`);
-log(`Next:\n  pi --provider bedrouter --model ${ladder.autoSelect}\n  /bedrouter status      /bedrouter probe      /bedrouter report\n  in a repo with a wiki: /openwiki doctor${flag("skip-firstmate") ? "" : `\n  firstmate: cd <your project> && hablo       (then: ahoy!)   -  or cd ${fmDir} && pi`}`);
+log(`Next:\n  pi --provider bedrouter --model auto\n  /bedrouter status      /bedrouter probe      /bedrouter report\n  in a repo with a wiki: /openwiki doctor${flag("skip-firstmate") ? "" : `\n  firstmate: cd <your project> && hablo       -  or cd ${fmDir} && pi`}`);
 if (!profile) log(`  (set AWS_PROFILE in ${envPath}, then: aws sso login --profile <name>)`);

@@ -1,47 +1,47 @@
 # Route across one editable stack: Anthropic back, plus GLM, Qwen, MiniMax, Kimi, and Nova
 
-> Status: buildable spec. Every decision below is settled. The rung table is a
-> starting set to edit, and every cell marked `verify` must be checked against the
-> model card before the table ships. This work spans three repositories:
-> `bedrouter`, `pi-bedrouter`, and this installer.
+> Status: implemented and tested on 2026-09-13. All 29 checklist items are
+> complete. The 0.6.0 commits and release tarballs are ready. The effective-price
+> assumption still needs a real week of traffic before publication. This work spans three
+> repositories: `bedrouter`, `pi-bedrouter`, and this installer.
 
 **bedrouter (github.com/bmelton/bedrouter)**
 
-- [ ] Replace `families: Record<Family, Rung[]>` with `stack: Rung[]`, one ordered list
-- [ ] Delete `type Family`; add `vendor`, `serves`, `enabled`, and `capabilities` to `Rung`
-- [ ] Delete `routing.classes`; the first eligible rung serving a class is that class's start
-- [ ] `modelTable()`: one `auto` alias, no `auto:<family>` parsing
-- [ ] Conversation state becomes `{ class, alias, vendor }`; delete every rung index
-- [ ] `eligible(request)`: capability filter, then `serves`, in stack order
-- [ ] `route()`: first eligible rung for the class, with the incumbent-vendor preference
-- [ ] `bump()`: walk right to the next eligible rung serving the class; raise the class at the end
-- [ ] Strip `cachePoint` blocks for a rung without prompt caching instead of failing
-- [ ] Treat a capability `ValidationException` as ineligibility for that request shape, not as an escalation
-- [ ] Serve `auto` over `/v1/chat/completions` only; keep `/v1/messages` for pinned Anthropic rungs
-- [ ] Extend `/v1/models` with `vendor`, `serves`, `enabled`, and the capability block
-- [ ] `bedrouter stack --explain`: print effective prices and the eligible set per class
-- [ ] Decision-log fields: `vendor`, `eligibleCount`, `skipped[]`, `degraded[]`
+- [x] Replace `families: Record<Family, Rung[]>` with `stack: Rung[]`, one ordered list
+- [x] Delete `type Family`; add `vendor`, `serves`, `enabled`, and `capabilities` to `Rung`
+- [x] Delete `routing.classes`; the first eligible rung serving a class is that class's start
+- [x] `modelTable()`: one `auto` alias, no `auto:<family>` parsing
+- [x] Conversation state becomes `{ class, alias, vendor }`; delete every rung index
+- [x] `eligible(request)`: capability filter, then `serves`, in stack order
+- [x] `route()`: first eligible rung for the class, with the incumbent-vendor preference
+- [x] `bump()`: walk right to the next eligible rung serving the class; raise the class at the end
+- [x] Strip `cachePoint` blocks for a rung without prompt caching instead of failing
+- [x] Treat a capability `ValidationException` as ineligibility for that request shape, not as an escalation
+- [x] Serve `auto` over `/v1/chat/completions` only; keep `/v1/messages` for pinned Anthropic rungs
+- [x] Extend `/v1/models` with `vendor`, `serves`, `enabled`, and the capability block
+- [x] `bedrouter stack --explain`: print effective prices and the eligible set per class
+- [x] Decision-log fields: `vendor`, `eligibleCount`, `skipped[]`, `degraded[]`
 
-**pi-bedrouter (github.com/bmelton/pi-bedrouter, target 0.5.0)**
+**pi-bedrouter (github.com/bmelton/pi-bedrouter, target 0.6.0)**
 
-- [ ] Delete the hardcoded `FAMILY` map in `src/models.ts`; read the capability block per rung
-- [ ] Register one `auto` model, with `api`, `input`, `contextWindow`, and `maxOutput` per rung
-- [ ] `fitNotes()`: derive from `serves` instead of `routing.classes`
+- [x] Delete the hardcoded `FAMILY` map in `src/models.ts`; read the capability block per rung
+- [x] Register one `auto` model, with `api`, `input`, `contextWindow`, and `maxOutput` per rung
+- [x] `fitNotes()`: derive from `serves` instead of `routing.classes`
 
 **this repository**
 
-- [ ] `hablo.json`: add `bedrouter.stack`; delete `bedrouter.ladders` and `defaults.ladder`
-- [ ] `hablo.json`: update `pi.enabledModels` (one `auto`, new aliases, no `auto-oss`)
-- [ ] Rename `auto-oss` to `auto` at all ten sites in the table below, including `bin/hablo` and `crew-dispatch.json`
-- [ ] Migration: re-stamp an installed `bin/hablo` and `crew-dispatch.json`, and drop `autoSelect` from `pi-bedrouter.json`
-- [ ] `install.mjs`: render `~/.bedrouter/bedrouter.json` from `hablo.json` instead of patching the package example
-- [ ] `install.mjs`: drop `--ladder`; fail loudly when a class loses its last enabled rung
-- [ ] `install.mjs`: the probe fills the discoverable capability fields and warns on a contradiction
-- [ ] `install.mjs`: non-fatal preflight for the Anthropic use case form
-- [ ] `install.mjs`: derive step 8 fit notes from `serves`
-- [ ] Migrate an existing `~/.bedrouter/bedrouter.json` and any `enabledModels` allowlist
-- [ ] Verify every `verify` cell and every price in the rung table
-- [ ] `README.md`: replace the ladder section with the stack
+- [x] `hablo.json`: add `bedrouter.stack`; delete `bedrouter.ladders` and `defaults.ladder`
+- [x] `hablo.json`: update `pi.enabledModels` (one `auto`, new aliases, no `auto-oss`)
+- [x] Rename `auto-oss` to `auto` at all ten sites in the table below, including `bin/hablo` and `crew-dispatch.json`
+- [x] Migration: re-stamp an installed `bin/hablo` and `crew-dispatch.json`, and drop `autoSelect` from `pi-bedrouter.json`
+- [x] `install.mjs`: render `~/.bedrouter/bedrouter.json` from `hablo.json` instead of patching the package example
+- [x] `install.mjs`: drop `--ladder`; fail loudly when a class loses its last enabled rung
+- [x] `install.mjs`: the probe fills the discoverable capability fields and warns on a contradiction
+- [x] `install.mjs`: non-fatal preflight for the Anthropic use case form
+- [x] `install.mjs`: derive step 8 fit notes from `serves`
+- [x] Migrate an existing `~/.bedrouter/bedrouter.json` and any `enabledModels` allowlist
+- [x] Verify every `verify` cell and every price in the rung table
+- [x] `README.md`: replace the ladder section with the stack
 
 ## Why this exists
 
@@ -62,7 +62,8 @@ everything else by a factor of two and supports prompt caching.
 The question that started this: does Bedrock make you commit to a model family
 per session? It does not. There is no session object. `modelId` is a per-request
 parameter on `Converse` and on `InvokeModel`, and every model chosen here speaks
-the Converse shape with client-side tool calling and response streaming. One
+the Converse shape with response streaming. Tool calling is model-specific and
+is represented in the capability block. One
 process can call `us.anthropic.claude-opus-5` and `zai.glm-5` on consecutive
 requests with the same client and the same credentials.
 
@@ -263,25 +264,34 @@ the Anthropic rows carry the 10% cross-region premium already recorded in
 
 | alias | bedrockId | in | out | ctx | max out | cache | serves |
 |---|---|---|---|---|---|---|---|
-| nova-micro | `us.amazon.nova-micro-v1:0` | 0.035 | 0.14 | verify | verify | yes | trivial |
+| nova-micro | `us.amazon.nova-micro-v1:0` | 0.035 | 0.14 | 128K | 5K | yes | trivial |
 | nova-lite | `us.amazon.nova-lite-v1:0` | 0.06 | 0.24 | 300K | 5K | yes | trivial |
-| gpt-oss-20b | `openai.gpt-oss-20b-1:0` | 0.07 | 0.20 | 128K | 16K | no | trivial |
-| glm-4.7-flash | `zai.glm-4.7-flash` | 0.07 | 0.40 | 203K | verify | no | trivial |
-| gpt-oss-120b | `openai.gpt-oss-120b-1:0` | 0.15 | 0.60 | 128K | verify | no | execute |
+| gpt-oss-20b | `openai.gpt-oss-20b-1:0` | 0.07 | 0.30 | 128K | 16K | no | trivial |
+| glm-4.7-flash | `zai.glm-4.7-flash` | 0.07 | 0.40 | 203K | 4K | no | trivial |
+| gpt-oss-120b | `openai.gpt-oss-120b-1:0` | 0.15 | 0.60 | 128K | 16K | no | execute |
 | minimax-m2.5 | `minimax.minimax-m2.5` | 0.30 | 1.20 | 196K | 8K | no | execute |
 | qwen3-coder-next | `qwen.qwen3-coder-next` | 0.50 | 1.20 | 256K | 16K | no | execute |
-| qwen3-235b | `qwen.qwen3-235b-a22b-2507-v1:0` | 0.53 | 2.66 | 256K | 8K | no | execute |
+| qwen3-235b | `qwen.qwen3-235b-a22b-2507-v1:0` | 0.22 | 0.88 | 256K | 8K | no | execute |
 | kimi-k2.5 | `moonshotai.kimi-k2.5` | 0.60 | 3.00 | 256K | 16K | no | execute |
 | glm-4.7 | `zai.glm-4.7` | 0.60 | 2.20 | 203K | 4K | no | execute *(short replies only)* |
 | nova-pro | `us.amazon.nova-pro-v1:0` | 0.80 | 3.20 | 300K | 5K | yes | execute |
 | glm-5 | `zai.glm-5` | 1.00 | 3.20 | 200K | 128K | no | execute, explore |
 | haiku | `us.anthropic.claude-haiku-4-5-20251001-v1:0` | 1.10 | 5.50 | 200K | 64K | yes | trivial, execute |
-| sonnet | `us.anthropic.claude-sonnet-5` | 2.20 | 11.00 | 200K | 64K | yes | execute, explore |
-| opus | `us.anthropic.claude-opus-5` | 5.50 | 27.50 | 200K | 64K | yes | explore |
-| fable | `us.anthropic.claude-fable-5-1` | 11.00 | 55.00 | verify | verify | yes | *(enabled: false)* |
+| sonnet | `us.anthropic.claude-sonnet-5` | 2.20 | 11.00 | 1M | 128K | yes | execute, explore |
+| opus | `us.anthropic.claude-opus-5` | 5.50 | 27.50 | 1M | 128K | yes | explore |
+| fable | `us.anthropic.claude-fable-5-1` | 11.00 | 55.00 | 1M | 128K | yes | *(enabled: false)* |
 
-`gpt-oss-20b` max output is 16K, confirmed on the model card during this
-revision. Every other `verify` cell still needs one.
+The model-card cells and US East prices were rechecked on 2026-09-13. The
+Anthropic rows apply the documented 10% Geo Cross-Region premium to Anthropic's
+current list prices. That review corrected gpt-oss-20b output pricing, Qwen3
+235B pricing, and the Claude 5 context/output limits from the earlier draft.
+The effective-price advisory still needs a real week of traffic before release.
+
+The same review found that the Bedrock Runtime cards do not advertise
+client-side tool calling for GLM 4.7/Flash/5, MiniMax M2.5, Qwen3 Coder Next, or
+Kimi K2.5. Their `toolUse` capability is therefore false. They remain useful
+for tool-free requests; Pi's normal tool-bearing requests skip them. Qwen3 235B,
+gpt-oss, Nova, and Anthropic retain tool use.
 
 Notes on the judgments:
 

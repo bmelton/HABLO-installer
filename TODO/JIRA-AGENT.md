@@ -1,9 +1,9 @@
 # Jira agent: a labelled ticket dispatches a captain
 
-> Status: buildable spec. Every decision below is settled unless it sits under
-> "Verify before you build" or "Open questions". The Jira Cloud search endpoint
-> and the `@file` argument behaviour are the two things written from memory; both
-> must be checked against a real instance before the code depends on them.
+> Status: implemented and tested against Jira HTTP stubs; live `doctor` and an
+> end-to-end labelled-ticket demo remain. The enhanced Jira search contract was
+> verified against Atlassian's current REST v3 reference, and installed Pi's help
+> confirms positional `@file` expansion.
 >
 > This document is the Jira-to-agent direction. [JIRA.md](JIRA.md) is the
 > agent-to-Jira direction (agents comment on the ticket as each stage finishes).
@@ -11,27 +11,27 @@
 > `hablo.json`, so the client, the ADF walker, and the project map are built
 > once. Either document can ship first; the second one inherits that half.
 
-- [ ] Verify the Jira Cloud search endpoint, its request body, and its pagination
-- [ ] Verify that `pi` expands `@path` in a positional message argument
-- [ ] `jira/`: one Go module, `cmd/hablo-jira-agent`, shared `internal/*` skeleton (see [JIRA.md](JIRA.md))
-- [ ] `internal/config`: load `config.json`, load the env file, validate every path
-- [ ] `internal/jira`: search, read one issue, add and remove labels, add a comment
-- [ ] `internal/adf`: Atlassian Document Format to Markdown, with golden tests
-- [ ] `internal/state`: the run directory, the lock file, per-key attempts and backoff
-- [ ] `internal/dispatch`: preflight guards, brief rendering, the tmux launch
-- [ ] `tick`: claim, dispatch, reap, in that order, one pass per invocation
-- [ ] `report`: the subcommand the captain calls when the ticket is finished
-- [ ] `status` and `doctor` subcommands
-- [ ] `--dry-run`: print the claim writes and the tmux command, write nothing
-- [ ] `jira/brief.tmpl.md`: the captain's opening message
-- [ ] Unit tests against an `httptest` Jira stub, plus ADF fixtures
-- [ ] Add the `jira` block (shared with [JIRA.md](JIRA.md)) to `hablo.json`
-- [ ] `install.mjs` step 12: build the binary, render `config.json`, install the template
-- [ ] `install.mjs` step 12: write and load the launchd agent or the systemd user timer
-- [ ] `install.mjs` preflight: report the Go toolchain, skip the step with a warning when absent
-- [ ] Add `--skip-jira-agent`, `--jira-agent-interval`, `--no-jira-agent-service` and the usage header lines
-- [ ] Add the daemon's paths to `backup.config` and to the uninstall receipt
-- [ ] `README.md`: the label contract, the project map, and how to stop it
+- [x] Verify the Jira Cloud search endpoint, its request body, and its pagination
+- [x] Verify that `pi` expands `@path` in a positional message argument
+- [x] `jira/`: one Go module, `cmd/hablo-jira-agent`, shared `internal/*` skeleton (see [JIRA.md](JIRA.md))
+- [x] `internal/config`: load `config.json`, load the env file, validate every path
+- [x] `internal/jira`: search, read one issue, add and remove labels, add a comment
+- [x] `internal/adf`: Atlassian Document Format to Markdown, with golden tests
+- [x] `internal/state`: the run directory, the lock file, per-key attempts and backoff
+- [x] `internal/dispatch`: preflight guards, brief rendering, the tmux launch
+- [x] `tick`: claim, dispatch, reap, in that order, one pass per invocation
+- [x] `report`: the subcommand the captain calls when the ticket is finished
+- [x] `status` and `doctor` subcommands
+- [x] `--dry-run`: print the claim writes and the tmux command, write nothing
+- [x] `jira/brief.tmpl.md`: the captain's opening message
+- [x] Unit tests against an `httptest` Jira stub, plus ADF fixtures
+- [x] Add the `jira` block (shared with [JIRA.md](JIRA.md)) to `hablo.json`
+- [x] `install.mjs` step 13: build the binary, render `config.json`, install the template
+- [x] `install.mjs` step 13: write and load the launchd agent or the systemd user timer
+- [x] `install.mjs` preflight: report the Go toolchain, skip the step with a warning when absent
+- [x] Add `--skip-jira-agent`, `--jira-agent-interval`, `--no-jira-agent-service` and the usage header lines
+- [x] Add the daemon's paths to `backup.config` and to the uninstall receipt
+- [x] `README.md`: the label contract, the project map, and how to stop it
 
 ## What this is
 
@@ -89,7 +89,7 @@ the installer, not a label anyone with Jira write access can type.
 One module, two binaries: this daemon and the reporting CLI in
 [JIRA.md](JIRA.md). One commit changes the manifest, the installer step, and the
 daemon together. No release pipeline, no download, no checksum. The cost is a Go
-toolchain on the machine; preflight reports it and step 12 skips with a warning
+toolchain on the machine; preflight reports it and step 13 skips with a warning
 when it is missing, the same way the AWS step already behaves.
 
 **Labels are the claim.** `agent-ready` to `agent-running` is the daemon's first
@@ -443,11 +443,12 @@ the unit, for a machine where the ticket flow is run by hand.
 
 ## Installer wiring
 
-New step 12, after the tool dependencies. It behaves like the steps around it:
+New step 13, after the tool dependencies (step 12 remains reserved for the guard). It behaves like the steps around it:
 it prints what it did, it never overwrites a file that lacks the `HABLO` marker,
 and it warns rather than exits.
 
-1. Skip entirely on `--skip-jira-agent`, or when `jira.agent.enabled` is false.
+1. On `--skip-jira-agent`, or when `jira.agent.enabled` is false, still install
+   the reporting CLI and skip the dispatch binary and service.
 2. Find the Go toolchain. Missing, or older than 1.22, means a warning and a skip,
    with the install hint. Preflight also reports it, alongside `pi` and `aws`.
 3. `go build -trimpath -o <binDir>/hablo-jira-agent ./jira/cmd/hablo-jira-agent`, run from this

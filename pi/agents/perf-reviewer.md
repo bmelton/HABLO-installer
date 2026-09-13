@@ -43,3 +43,5 @@ and suggested fixes.
 
 <!-- When automating: same findings schema as ui-reviewer so a single reduce
      can merge both reviews. -->
+
+When a Jira key is present, save the review and run `hablo-jira comment --key <KEY> --stage review --body @<file> --quiet`. Reporting failure never blocks the review.

@@ -1,6 +1,6 @@
 # Ticket updates: agents report progress to Jira
 
-> Status: buildable spec. Every decision below is settled unless it sits under
+> Status: implemented and tested; live `doctor` and end-to-end Jira demo remain. Every decision below is settled unless it sits under
 > "Verify before you build". The bridge changed in this revision: agents write to
 > Jira through a small Go CLI over the Jira REST API, not through MCP. The
 > reasoning and the evidence are under "Why not MCP".
@@ -9,25 +9,25 @@
 > the Jira-to-agent direction. They now share a Go module, a credential file, and
 > the `jira` block in `hablo.json`, so build the shared half once.
 
-- [ ] `jira/`: one Go module, `cmd/hablo-jira` and `cmd/hablo-jira-agent`, shared `internal/`
-- [ ] `internal/jira`: comment, transition, read one issue, search (shared with the daemon)
-- [ ] `internal/adf`: Atlassian Document Format to Markdown (shared with the daemon)
-- [ ] `internal/config`: load `~/.hablo/jira/config.json` and the env file, validate the project map
-- [ ] `hablo-jira comment`: stage marker, attribution from `FM_TASK_ID`, retry-once on 429
-- [ ] `hablo-jira transition`: logical name to workflow id, refuse any target in the Done category
-- [ ] `hablo-jira read` and `hablo-jira search`
-- [ ] `hablo-jira doctor`: auth, project map, and the real transitions available on a ticket
-- [ ] `--dry-run` on every mutating subcommand: print the request, send nothing
-- [ ] Exit-code contract (0/3/4) and `--quiet`, so a failed update never stops the build
-- [ ] Unit tests against an `httptest` Jira stub, plus the comment-marker dedupe case
-- [ ] Add the `jira` block to `hablo.json`, with `projects` shared by both binaries
-- [ ] `install.mjs`: build `hablo-jira`, render `~/.hablo/jira/config.json`, run `doctor`
-- [ ] `install.mjs`: the credential preflight, non-fatal, with the API-token link
-- [ ] Add `--skip-jira` / `--no-tracker` and the usage header line
-- [ ] Write `firstmate/captain-ticket-policy.md` from the cadence table, with literal commands
-- [ ] Wire `captainBlock("TICKET-POLICY", …)` into `install.mjs` step 9
-- [ ] Add the reporting duty to the six existing profiles in `pi/agents/` (no new agents)
-- [ ] Document it in `README.md`
+- [x] `jira/`: one Go module, `cmd/hablo-jira` and `cmd/hablo-jira-agent`, shared `internal/`
+- [x] `internal/jira`: comment, transition, read one issue, search (shared with the daemon)
+- [x] `internal/adf`: Atlassian Document Format to Markdown (shared with the daemon)
+- [x] `internal/config`: load `~/.hablo/jira/config.json` and the env file, validate the project map
+- [x] `hablo-jira comment`: stage marker, attribution from `FM_TASK_ID`, retry-once on 429
+- [x] `hablo-jira transition`: logical name to workflow id, refuse any target in the Done category
+- [x] `hablo-jira read` and `hablo-jira search`
+- [x] `hablo-jira doctor`: auth, project map, and the real transitions available on a ticket
+- [x] `--dry-run` on every mutating subcommand: print the request, send nothing
+- [x] Exit-code contract (0/3/4) and `--quiet`, so a failed update never stops the build
+- [x] Unit tests against an `httptest` Jira stub, plus the comment-marker dedupe case
+- [x] Add the `jira` block to `hablo.json`, with `projects` shared by both binaries
+- [x] `install.mjs`: build `hablo-jira`, render `~/.hablo/jira/config.json`, run `doctor`
+- [x] `install.mjs`: the credential preflight, non-fatal, with the API-token link
+- [x] Add `--skip-jira` / `--no-tracker` and the usage header line
+- [x] Write `firstmate/captain-ticket-policy.md` from the cadence table, with literal commands
+- [x] Wire `captainBlock("TICKET-POLICY", …)` into `install.mjs` step 9
+- [x] Add the reporting duty to the six existing profiles in `pi/agents/` (no new agents)
+- [x] Document it in `README.md`
 
 ## What this is
 
@@ -321,6 +321,8 @@ belongs in `backup.essentials` beside `.bedrouter/.env`.
 4. **Comment search for the marker.** Confirm the comment list endpoint supports
    enough ordering or paging to check recent comments cheaply, so the dedupe does
    not read a hundred comments on a busy ticket.
-5. **`FM_TASK_ID` in a crewmate pane**, which is also item 6 of the verification
-   list in [HOOKS.md](HOOKS.md). Attribution and the guard's session-kind probe
-   read the same variable; check it once and record the answer in both documents.
+5. **`FM_TASK_ID` in a crewmate pane. Verified 2026-09-13 from the installed
+   firstmate launch path.** `fm-spawn.sh` exports it for ship and scout panes on
+   every backend. Secondmates deliberately do not receive it because they run in
+   their own home; Jira reporting therefore attributes an unmarked caller as the
+   captain rather than inventing an identity.

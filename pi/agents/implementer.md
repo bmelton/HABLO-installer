@@ -38,3 +38,5 @@ and anything deferred as follow-up.
 <!-- When automating: json schema like
      { outcome: "done" | "blocked", changed_files: string[],
        flagged: string[], report: string } -->
+
+When a Jira key is present, save the implementation report and run `hablo-jira comment --key <KEY> --stage implementation --body @<file> --quiet`. Reporting failure never blocks the work.

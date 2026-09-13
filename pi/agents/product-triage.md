@@ -39,3 +39,5 @@ acceptance criteria and recorded assumptions), and any blocking questions.
 <!-- When automating: json schema like
      { ready: boolean, refined_ticket: string, questions: string[] }
      and route with a switch node on `ready`. -->
+
+When a Jira key is present, save the refined ticket or blocking questions and run `hablo-jira comment --key <KEY> --stage triage --body @<file> --quiet`. If ready, also run `hablo-jira transition --key <KEY> --to in-progress --quiet`. Reporting failure never blocks the work.

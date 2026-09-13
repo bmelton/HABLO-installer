@@ -1,16 +1,16 @@
 {
-  "$comment": "Written by HABLO-installer to <firstmate>/config/crew-dispatch.json. Every crewmate and scout is a Pi session on bedrouter's auto model, so model tiering is bedrouter's decision (per request, with escalation) rather than the dispatcher's. __MODEL__ is replaced with bedrouter/<ladder auto alias>.",
+  "$comment": "Written by HABLO-installer to <firstmate>/config/crew-dispatch.json. Every crewmate and scout is a Pi session on the captain's own provider and model; the exact --model string is in the captain's system prompt, under 'Crew model (HABLO, this voyage)'.",
   "rules": [
     {
       "when": "Any task: implementation, fixes, refactors, tests, documentation, investigation, review, scouting.",
-      "use": { "harness": "pi", "model": "__MODEL__" },
-      "why": "HABLO routes every request through bedrouter, which classifies each request (trivial / execute / explore), picks the cheapest adequate Bedrock model, sticks per conversation, and escalates on failure. Do not pin other models or harnesses; the router's decision log is the cost record for the whole crew."
+      "use": { "harness": "pi" },
+      "why": "The crew runs whatever the captain runs. Pass --model with the exact provider/id string from the 'Crew model (HABLO, this voyage)' block in your system prompt, and never omit it. On bedrouter that string is an auto alias, so model tiering stays bedrouter's per-request decision rather than the dispatcher's; on any other provider it keeps the crew on the login the captain chose for today's billing."
     },
     {
-      "when": "The captain explicitly asks for a specific tier, e.g. 'use the strongest model' or 'cheap pass only'.",
-      "use": { "harness": "pi", "model": "__MODEL__", "effort": "high" },
-      "why": "Even then stay on bedrouter: raise effort (thinking) rather than pinning a model; bedrouter treats high effort as an explore signal and routes up."
+      "when": "The user explicitly asks for a specific tier, e.g. 'use the strongest model' or 'cheap pass only'.",
+      "use": { "harness": "pi", "effort": "high" },
+      "why": "Raise effort rather than pinning a model. On bedrouter, high effort is an explore signal and the router routes up; on other providers it maps to that provider's own reasoning level. Either way the crew stays on the captain's provider."
     }
   ],
-  "default": { "harness": "pi", "model": "__MODEL__" }
+  "default": { "harness": "pi" }
 }

@@ -42,3 +42,5 @@ Output: verdict (approved / changes_required) plus the findings list.
      { outcome: "approved" | "changes_required",
        findings: [{severity, location, issue, fix}], report: string }
      — feeds a while-loop back to the implementer. -->
+
+When a Jira key is present, save the review and run `hablo-jira comment --key <KEY> --stage review --body @<file> --quiet`. Reporting failure never blocks the review.

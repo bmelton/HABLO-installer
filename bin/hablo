@@ -13,16 +13,18 @@
 #   projects/<name>             -> a symlink to this directory, so scripts that expect projects/<name> keep working
 #   pi -e ...                   -> firstmate's tracked Pi extensions plus hablo-captain.ts, which injects AGENTS.md
 #                                  (with absolute bin/ paths) into the system prompt
-#   --provider/--model          -> the bedrouter provider and the ladder's auto model chosen at install time, unless
-#                                  you pass your own (or set HABLO_PROVIDER / HABLO_MODEL)
+#   --provider/--model          -> the provider and model chosen for this voyage; command-line flags win over
+#                                  HABLO_PROVIDER / HABLO_MODEL, which win over the installer defaults
 # Bash 3.2 compatible (macOS); works on Linux and WSL. Nothing here needs root.
 set -eu
 
 FM_ROOT="${FM_ROOT:-__FM_ROOT__}"
 HABLO_HOME="${HABLO_HOME:-__HABLO_HOME__}"
 MODE="${HABLO_PROJECT_MODE:-direct-PR}"
-PROVIDER="${HABLO_PROVIDER:-__PROVIDER__}"
-MODEL="${HABLO_MODEL:-__MODEL__}"
+DEFAULT_PROVIDER="__PROVIDER__"
+DEFAULT_MODEL="__MODEL__"
+PROVIDER="${HABLO_PROVIDER:-$DEFAULT_PROVIDER}"
+MODEL="${HABLO_MODEL:-$DEFAULT_MODEL}"
 
 usage() {
   sed -n '2,20p' "$0" | sed 's/^# \{0,1\}//'
@@ -42,11 +44,57 @@ export FM_ROOT_OVERRIDE="$root_real"
 export FM_HOME="${FM_HOME:-$root_real}"
 export PATH="$root_real/bin:$PATH"
 
-# Default provider/model unless the caller chose their own.
-has_provider=0; has_model=0
-for a in "$@"; do case "$a" in --provider|--provider=*) has_provider=1;; --model|--model=*) has_model=1;; esac; done
+# Resolve the voyage before launching. Pi accepts provider/id in --model; firstmate's Pi harness has no separate
+# provider slot, so HABLO_CREW_MODEL always carries that complete form.
+has_provider=0; has_model=0; cli_provider=""; cli_model=""; expect=""
+for a in "$@"; do
+  if [ -n "$expect" ]; then
+    [ -n "$a" ] || { echo "hablo: --$expect requires a non-empty value" >&2; exit 2; }
+    if [ "$expect" = provider ]; then cli_provider="$a"; else cli_model="$a"; fi
+    expect=""
+    continue
+  fi
+  case "$a" in
+    --) break ;;
+    --provider) has_provider=1; expect=provider ;;
+    --provider=*) has_provider=1; cli_provider="${a#--provider=}"; [ -n "$cli_provider" ] || { echo "hablo: --provider requires a non-empty value" >&2; exit 2; } ;;
+    --model) has_model=1; expect=model ;;
+    --model=*) has_model=1; cli_model="${a#--model=}"; [ -n "$cli_model" ] || { echo "hablo: --model requires a non-empty value" >&2; exit 2; } ;;
+  esac
+done
+[ -z "$expect" ] || { echo "hablo: --$expect requires a value" >&2; exit 2; }
+
+[ "$has_provider" = 0 ] || PROVIDER="$cli_provider"
+[ "$has_model" = 0 ] || MODEL="$cli_model"
+
+case "$MODEL" in
+  */*)
+    CREW_MODEL="$MODEL"; VOYAGE_PROVIDER="${MODEL%%/*}"
+    if [ "$has_provider" = 1 ] && [ "$PROVIDER" != "$VOYAGE_PROVIDER" ]; then
+      echo "hablo: --provider '$PROVIDER' conflicts with --model '$MODEL'" >&2; exit 2
+    fi
+    PROVIDER="$VOYAGE_PROVIDER"
+    ;;
+  *)
+    if [ "$has_model" = 1 ] && [ "$has_provider" = 0 ] && [ -z "${HABLO_PROVIDER:-}" ]; then
+      settings_provider="$(node -e 'try { const j=require(process.argv[1]); process.stdout.write(j.defaultProvider || "") } catch {}' "${PI_CODING_AGENT_DIR:-$HOME/.pi/agent}/settings.json")"
+      [ -n "$settings_provider" ] || { echo "hablo: --model '$MODEL' has no provider; use --model provider/id or add --provider" >&2; exit 2; }
+      PROVIDER="$settings_provider"
+    fi
+    CREW_MODEL="$PROVIDER/$MODEL"; VOYAGE_PROVIDER="$PROVIDER"
+    ;;
+esac
+export HABLO_CREW_MODEL="$CREW_MODEL"
+
 [ "$has_model" = 1 ] || set -- --model "$MODEL" "$@"
 [ "$has_provider" = 1 ] || set -- --provider "$PROVIDER" "$@"
+
+echo "hablo: captain  $CREW_MODEL" >&2
+echo "hablo: crew     $CREW_MODEL (inherited)" >&2
+if [ "$VOYAGE_PROVIDER" != bedrouter ]; then
+  echo "hablo: WARNING  bedrouter is not in this voyage; no cost routing, rung fallback, or /bedrouter usage." >&2
+  echo "                Crew tokens bill to this provider." >&2
+fi
 
 # Standing in the firstmate checkout itself: plain firstmate, its own discovery does the rest.
 if [ "$proj" = "$root_real" ]; then exec pi "$@"; fi

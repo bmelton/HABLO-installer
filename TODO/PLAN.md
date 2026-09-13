@@ -8,16 +8,22 @@
 >
 > `TODO/later/` is out of scope here. See "What would pull `later/` forward".
 
-- [ ] **Wave 0** [UN-NAUTICAL.md](UN-NAUTICAL.md) (13 items)
-- [ ] **Wave 0** [UNINSTALL-PI-AND-EVERYTHING.md](UNINSTALL-PI-AND-EVERYTHING.md) phase A: the receipt only (6 of 17 items)
-- [ ] **Wave 1** [BEDROUTER-WITH-NON-BEDROCK-PROVIDERS.md](BEDROUTER-WITH-NON-BEDROCK-PROVIDERS.md) (20 items, `pi-bedrouter` 0.5.0)
-- [ ] **Wave 1** [MORE-PROVIDERS-AND-MODELS.md](MORE-PROVIDERS-AND-MODELS.md) (29 items, `bedrouter` + `pi-bedrouter` 0.6.0)
+- [ ] **Wave 0** [UN-NAUTICAL.md](UN-NAUTICAL.md) (12 of 13 complete; live language-output sign-off remains)
+- [x] **Wave 0** [UNINSTALL-PI-AND-EVERYTHING.md](UNINSTALL-PI-AND-EVERYTHING.md) phase A: the receipt only (6 of 17 items)
+- [ ] **Wave 1** [BEDROUTER-WITH-NON-BEDROCK-PROVIDERS.md](BEDROUTER-WITH-NON-BEDROCK-PROVIDERS.md) (19 of 20 complete; `pi-bedrouter` 0.5.0 publication pending)
+- [ ] **Wave 1** [MORE-PROVIDERS-AND-MODELS.md](MORE-PROVIDERS-AND-MODELS.md) (29 of 29 implementation items complete; 0.6.0 commits and tarballs ready; live-week validation and publication pending)
+
 - [ ] **Wave 2** [HOOKS.md](HOOKS.md) (19 items, installer step 12)
 - [ ] **Wave 2** [DEPENDENCY-TRUST.md](DEPENDENCY-TRUST.md) (14 items)
-- [ ] **Wave 3** [JIRA.md](JIRA.md) (19 items, installer step 13)
-- [ ] **Wave 3** [JIRA-AGENT.md](JIRA-AGENT.md) (21 items)
+- [ ] **Wave 3** [JIRA.md](JIRA.md) (19 of 19 implementation items complete; live Jira demo pending)
+- [ ] **Wave 3** [JIRA-AGENT.md](JIRA-AGENT.md) (21 of 21 implementation items complete; live Jira demo pending)
 - [ ] **Wave 4** [DREAM.md](DREAM.md) (20 items, installer step 14)
 - [ ] **Wave 5** [UNINSTALL-PI-AND-EVERYTHING.md](UNINSTALL-PI-AND-EVERYTHING.md) phase B: the command (11 of 17 items)
+
+Registry check on 2026-09-13: npm still has `pi-bedrouter@0.4.1` and
+`bedrouter@0.4.2`; `npm whoami` returns E401 on this machine. Publication
+therefore waits for `npm login`, then proceeds in order:
+`pi-bedrouter@0.5.0`, `bedrouter@0.6.0`, `pi-bedrouter@0.6.0`.
 
 172 checklist items. The item count is the only size signal here; it is not an
 estimate of time.
@@ -66,6 +72,11 @@ the same work done worse, from memory.
 Phase A is done when a normal install produces a `~/.hablo/receipt.json` whose
 actions account for every file the run wrote, and a second run appends rather
 than replaces.
+
+Completed 2026-09-13. A fixture install covers a default run followed by
+`--nautical`, verifies hashes and merged-key provenance, and confirms the second
+run appends. Retention remains dormant until phase B can compact old runs without
+losing their original values.
 
 ## Wave 1: bedrouter, in this order
 
@@ -181,7 +192,7 @@ Answer each once, in the wave named, and record the answer in both documents.
 
 | Question | Answered in | Also needed by |
 |---|---|---|
-| Does an explicit `-e` disable auto-discovery of `~/.pi/agent/extensions`? | Wave 0, UN-NAUTICAL | HOOKS (verify 1) |
+| Does an explicit `-e` disable auto-discovery of `~/.pi/agent/extensions`? **No; verified with Pi 0.85.1 on 2026-09-13.** | Wave 0, UN-NAUTICAL | HOOKS (verify 1) |
 | Is `FM_TASK_ID` exported in every crewmate, scout, and secondmate pane? | Wave 2, HOOKS (verify 6) | JIRA (verify 5), attribution |
 | Does an exception in a `tool_call` handler block the tool? | Wave 2, HOOKS (verify 2) | DEPENDENCY-TRUST |
 | What does the Go toolchain gate do when `go` is absent? | Wave 2, HOOKS | JIRA, DREAM |

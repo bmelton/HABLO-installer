@@ -1,36 +1,35 @@
 # Keep the suite when the provider is not bedrouter
 
-> Status: buildable spec. The crew mechanism that used to block this document is
-> decided, and the firstmate read that decided it is recorded below with line
-> references. Two items sit in another repository (`pi-bedrouter`) and are marked
-> as such. Everything under "Verify before you build" must be checked on a real
-> run before the code depends on it.
+> Status: implemented for the 0.5.0 release boundary; npm publication and the
+> remaining live voyage checks are pending. The provider precedence and late
+> switch paths are covered by package tests, and the HABLO wrapper is covered by
+> installer fixtures.
 
 **pi-bedrouter (github.com/bmelton/pi-bedrouter, separate repo, target 0.5.0)**
 
-- [ ] `launchedWithExplicitModel()`: parse `process.argv` for `--provider` / `--model`
-- [ ] `autoSelect()`: return early on an explicit choice, and on a non-bedrouter `defaultProvider`
-- [ ] `PI_BEDROUTER_AUTOSELECT=0` as the environment escape hatch
-- [ ] `session_start`: skip `bringUp` when the session is not intended for bedrouter
-- [ ] `model_select`: bring the server up when the user switches to bedrouter later
-- [ ] Keep `registerProvider` unconditional, so `--list-models` and `/model` still show bedrouter
-- [ ] Tests for the precedence table, and a README note on the new behaviour
+- [x] `launchedWithExplicitModel()`: parse `process.argv` for `--provider` / `--model`
+- [x] `autoSelect()`: return early on an explicit choice, and on a non-bedrouter `defaultProvider`
+- [x] `PI_BEDROUTER_AUTOSELECT=0` as the environment escape hatch
+- [x] `session_start`: skip `bringUp` when the session is not intended for bedrouter
+- [x] `model_select`: bring the server up when the user switches to bedrouter later
+- [x] Keep `registerProvider` unconditional, so `--list-models` and `/model` still show bedrouter
+- [x] Tests for the precedence table, and a README note on the new behaviour
 - [ ] Release 0.5.0
 
 **HABLO-installer (this repo)**
 
-- [ ] `bin/hablo`: parse `--provider` / `--model`, above `HABLO_PROVIDER` / `HABLO_MODEL`
-- [ ] `bin/hablo`: resolve one `provider/model` string and export `HABLO_CREW_MODEL`
-- [ ] `bin/hablo`: print the captain line and the crew line before launching
-- [ ] `bin/hablo`: refuse a bare `--model` with no provider prefix and no `--provider`
-- [ ] `bin/hablo`: warn, and continue, when the voyage is not on bedrouter
-- [ ] `pi/extensions/hablo-captain.ts`: inject the crew-model block, from `ctx.model`
-- [ ] `firstmate/crew-dispatch.json`: drop `__MODEL__`, rewrite the rules and the `why` text
-- [ ] `install.mjs` step 9: stop substituting `__MODEL__`
-- [ ] `install.mjs` preflight: report the `pi-bedrouter` version against `pi.minVersions`
-- [ ] `hablo.json`: add `pi.minVersions`
-- [ ] `TODO/HOOKS.md`: record provider neutrality as a design constraint for the guard
-- [ ] `README.md`: one section on running the suite on another provider
+- [x] `bin/hablo`: parse `--provider` / `--model`, above `HABLO_PROVIDER` / `HABLO_MODEL`
+- [x] `bin/hablo`: resolve one `provider/model` string and export `HABLO_CREW_MODEL`
+- [x] `bin/hablo`: print the captain line and the crew line before launching
+- [x] `bin/hablo`: refuse a bare `--model` with no provider prefix and no `--provider`
+- [x] `bin/hablo`: warn, and continue, when the voyage is not on bedrouter
+- [x] `pi/extensions/hablo-captain.ts`: inject the crew-model block, from `ctx.model`
+- [x] `firstmate/crew-dispatch.json`: drop `__MODEL__`, rewrite the rules and the `why` text
+- [x] `install.mjs` step 9: stop substituting `__MODEL__`
+- [x] `install.mjs` preflight: report the `pi-bedrouter` version against `pi.minVersions`
+- [x] `hablo.json`: add `pi.minVersions`
+- [x] `TODO/HOOKS.md`: record provider neutrality as a design constraint for the guard
+- [x] `README.md`: one section on running the suite on another provider
 
 ## What this is
 

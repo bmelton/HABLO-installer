@@ -56,6 +56,11 @@ supported place to add this.
 The rules live in a Go binary. The Pi extension is a shim that marshals an event,
 runs the binary, and honours the verdict.
 
+**Provider neutrality is a design constraint.** The guard inspects tool calls,
+process environment, and filesystem boundaries only. It must never branch on
+the active model or provider, so the same policy covers bedrouter, subscription
+providers, and any provider Pi adds later.
+
 ```
 pi tool_call ──▶ hablo-guard.ts ──stdin json──▶ hablo-guard (Go)
                       │                              │  reads ~/.hablo/guard.json
@@ -551,7 +556,7 @@ Seven behaviours this design rests on. Six come from `docs/extensions.md` in the
 installed package, and one comes from reading `fm-spawn.sh`. Check each against a
 real session first, and correct this document where reality differs.
 
-1. **An explicit `-e` does not disable auto-discovery.** The whole global-shim
+1. **An explicit `-e` does not disable auto-discovery — verified 2026-09-13 with Pi 0.85.1.** A real RPC session loaded one command from an explicit `-e` file and one from `~/.pi/agent/extensions/` at the same time. The whole global-shim
    decision fails if a crewmate's `-e <task-ext>` replaces
    `~/.pi/agent/extensions/` instead of adding to it. Start a session with both
    and confirm the shim runs. This is the first thing to test, because a
@@ -568,10 +573,12 @@ real session first, and correct this document where reality differs.
    See `examples/extensions/timed-confirm.ts`.
 5. **`tool_result` appends survive to the model.** Confirm that a returned
    `content` patch reaches the transcript and is not dropped in parallel tool mode.
-6. **`FM_TASK_ID` is exported in every crewmate path.** `fm-spawn.sh:4137` sets it
-   for a task spawn. Confirm it for a scout and for a secondmate, because a
-   crewmate without it is classified as attended and gets a 120-second dialog
-   instead of an immediate deny.
+6. **`FM_TASK_ID` is exported in every ship/scout path; verified 2026-09-13.**
+   `fm-spawn.sh` sends it before launch for both kinds on every backend and keeps
+   it through the environment scrubber. Secondmates deliberately do not receive
+   it because they run in their own home. The guard must classify that path from
+   firstmate's secondmate marker instead of assuming every unattended worker has
+   `FM_TASK_ID`.
 7. **The cost of one `decide` exec.** Measure it on a cold and a warm page cache.
    If a process exec per tool call turns out to be visible in a session, the
    answer is a long-lived engine over a unix socket, and that is a change to the

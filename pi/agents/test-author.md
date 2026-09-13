@@ -40,3 +40,5 @@ you could not write a deterministic assertion for.
 
 <!-- When automating: json schema like
      { test_files: string[], uncovered: string[], report: string } -->
+
+When a Jira key is present, save the test report and run `hablo-jira comment --key <KEY> --stage tests --body @<file> --quiet`. Reporting failure never blocks the work.

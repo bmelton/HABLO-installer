@@ -1,11 +1,14 @@
 {
   "$comment": "HABLO machine manifest: what `install.mjs` puts in place. Edit here, not in the script.",
   "defaults": {
-    "$comment": "What a bare `./install.sh` assumes. --profile / --ladder on the command line win; AWS_PROFILE in the environment wins over defaults.profile.",
-    "profile": "bedrouter",
-    "ladder": "oss"
+    "$comment": "What a bare `./install.sh` assumes. --profile on the command line wins; AWS_PROFILE in the environment wins over defaults.profile.",
+    "profile": "bedrouter"
   },
   "pi": {
+    "minVersions": {
+      "$comment": "Installed Pi packages whose version HABLO depends on. Reported in preflight, never enforced: an older package still works, on bedrouter only.",
+      "pi-bedrouter": "0.6.0"
+    },
     "packages": [
       "npm:pi-agents",
       "npm:pi-usage-meters",
@@ -19,12 +22,21 @@
     "optionalPackages": [],
     "enabledModels": [
       "bedrouter/auto",
-      "bedrouter/auto-oss",
+      "bedrouter/nova-micro",
+      "bedrouter/nova-lite",
+      "bedrouter/gpt-oss-20b",
+      "bedrouter/glm-4.7-flash",
+      "bedrouter/gpt-oss-120b",
+      "bedrouter/minimax-m2.5",
+      "bedrouter/qwen3-coder-next",
+      "bedrouter/qwen3-235b",
+      "bedrouter/kimi-k2.5",
+      "bedrouter/glm-4.7",
+      "bedrouter/nova-pro",
+      "bedrouter/glm-5",
       "bedrouter/haiku",
       "bedrouter/sonnet",
-      "bedrouter/opus",
-      "bedrouter/gpt-oss-20b",
-      "bedrouter/gpt-oss-120b"
+      "bedrouter/opus"
     ],
     "settings": {
       "theme": "dark",
@@ -45,23 +57,33 @@
     "port": 20129,
     "region": "us-east-1",
     "routing": {
+      "enabled": true,
       "honorClientModel": false,
+      "cacheHitRate": 0.8,
       "classifier": {
         "enabled": true,
-        "model": "haiku",
+        "model": "nova-micro",
         "mode": "fallback"
       }
     },
-    "ladders": {
-      "claude": {
-        "family": "anthropic",
-        "autoSelect": "auto"
-      },
-      "oss": {
-        "family": "openai",
-        "autoSelect": "auto-oss"
-      }
-    },
+    "stack": [
+      { "alias": "nova-micro", "bedrockId": "us.amazon.nova-micro-v1:0", "vendor": "amazon", "enabled": true, "inputPerM": 0.035, "outputPerM": 0.14, "serves": ["trivial"], "capabilities": { "transport": "bedrock-runtime", "api": "converse", "toolUse": true, "streaming": true, "imageInput": false, "structuredOutputs": false, "promptCaching": true, "contextWindow": 128000, "maxOutput": 5000 } },
+      { "alias": "nova-lite", "bedrockId": "us.amazon.nova-lite-v1:0", "vendor": "amazon", "enabled": true, "inputPerM": 0.06, "outputPerM": 0.24, "serves": ["trivial"], "capabilities": { "transport": "bedrock-runtime", "api": "converse", "toolUse": true, "streaming": true, "imageInput": true, "structuredOutputs": false, "promptCaching": true, "contextWindow": 300000, "maxOutput": 5000 } },
+      { "alias": "gpt-oss-20b", "bedrockId": "openai.gpt-oss-20b-1:0", "vendor": "openai", "enabled": true, "inputPerM": 0.07, "outputPerM": 0.30, "serves": ["trivial"], "capabilities": { "transport": "bedrock-runtime", "api": "converse", "toolUse": true, "streaming": true, "imageInput": false, "structuredOutputs": true, "promptCaching": false, "contextWindow": 128000, "maxOutput": 16000 } },
+      { "alias": "glm-4.7-flash", "bedrockId": "zai.glm-4.7-flash", "vendor": "zai", "enabled": true, "inputPerM": 0.07, "outputPerM": 0.40, "serves": ["trivial"], "capabilities": { "transport": "bedrock-runtime", "api": "converse", "toolUse": false, "streaming": true, "imageInput": false, "structuredOutputs": true, "promptCaching": false, "contextWindow": 203000, "maxOutput": 4000 } },
+      { "alias": "gpt-oss-120b", "bedrockId": "openai.gpt-oss-120b-1:0", "vendor": "openai", "enabled": true, "inputPerM": 0.15, "outputPerM": 0.60, "serves": ["execute"], "capabilities": { "transport": "bedrock-runtime", "api": "converse", "toolUse": true, "streaming": true, "imageInput": false, "structuredOutputs": true, "promptCaching": false, "contextWindow": 128000, "maxOutput": 16000 } },
+      { "alias": "minimax-m2.5", "bedrockId": "minimax.minimax-m2.5", "vendor": "minimax", "enabled": true, "inputPerM": 0.30, "outputPerM": 1.20, "serves": ["execute"], "capabilities": { "transport": "bedrock-runtime", "api": "converse", "toolUse": false, "streaming": true, "imageInput": false, "structuredOutputs": true, "promptCaching": false, "contextWindow": 196000, "maxOutput": 8000 } },
+      { "alias": "qwen3-coder-next", "bedrockId": "qwen.qwen3-coder-next", "vendor": "qwen", "enabled": true, "inputPerM": 0.50, "outputPerM": 1.20, "serves": ["execute"], "capabilities": { "transport": "bedrock-runtime", "api": "converse", "toolUse": false, "streaming": true, "imageInput": false, "structuredOutputs": true, "promptCaching": false, "contextWindow": 256000, "maxOutput": 16000 } },
+      { "alias": "qwen3-235b", "bedrockId": "qwen.qwen3-235b-a22b-2507-v1:0", "vendor": "qwen", "enabled": true, "inputPerM": 0.22, "outputPerM": 0.88, "serves": ["execute"], "capabilities": { "transport": "bedrock-runtime", "api": "converse", "toolUse": true, "streaming": true, "imageInput": false, "structuredOutputs": true, "promptCaching": false, "contextWindow": 256000, "maxOutput": 8000 } },
+      { "alias": "kimi-k2.5", "bedrockId": "moonshotai.kimi-k2.5", "vendor": "moonshotai", "enabled": true, "inputPerM": 0.60, "outputPerM": 3.00, "serves": ["execute"], "capabilities": { "transport": "bedrock-runtime", "api": "converse", "toolUse": false, "streaming": true, "imageInput": true, "structuredOutputs": true, "promptCaching": false, "contextWindow": 256000, "maxOutput": 16000 } },
+      { "alias": "glm-4.7", "bedrockId": "zai.glm-4.7", "vendor": "zai", "enabled": true, "inputPerM": 0.60, "outputPerM": 2.20, "serves": ["execute"], "capabilities": { "transport": "bedrock-runtime", "api": "converse", "toolUse": false, "streaming": true, "imageInput": false, "structuredOutputs": true, "promptCaching": false, "contextWindow": 203000, "maxOutput": 4000 } },
+      { "alias": "nova-pro", "bedrockId": "us.amazon.nova-pro-v1:0", "vendor": "amazon", "enabled": true, "inputPerM": 0.80, "outputPerM": 3.20, "serves": ["execute"], "capabilities": { "transport": "bedrock-runtime", "api": "converse", "toolUse": true, "streaming": true, "imageInput": true, "structuredOutputs": false, "promptCaching": true, "contextWindow": 300000, "maxOutput": 5000 } },
+      { "alias": "glm-5", "bedrockId": "zai.glm-5", "vendor": "zai", "enabled": true, "inputPerM": 1.00, "outputPerM": 3.20, "serves": ["execute", "explore"], "capabilities": { "transport": "bedrock-runtime", "api": "converse", "toolUse": false, "streaming": true, "imageInput": false, "structuredOutputs": true, "promptCaching": false, "contextWindow": 200000, "maxOutput": 128000 } },
+      { "alias": "haiku", "bedrockId": "us.anthropic.claude-haiku-4-5-20251001-v1:0", "vendor": "anthropic", "enabled": true, "inputPerM": 1.10, "outputPerM": 5.50, "serves": ["trivial", "execute"], "capabilities": { "transport": "bedrock-runtime", "api": "converse", "toolUse": true, "streaming": true, "imageInput": true, "structuredOutputs": false, "promptCaching": true, "contextWindow": 200000, "maxOutput": 64000 } },
+      { "alias": "sonnet", "bedrockId": "us.anthropic.claude-sonnet-5", "vendor": "anthropic", "enabled": true, "inputPerM": 2.20, "outputPerM": 11.00, "serves": ["execute", "explore"], "capabilities": { "transport": "bedrock-runtime", "api": "converse", "toolUse": true, "streaming": true, "imageInput": true, "structuredOutputs": false, "promptCaching": true, "contextWindow": 1000000, "maxOutput": 128000 } },
+      { "alias": "opus", "bedrockId": "us.anthropic.claude-opus-5", "vendor": "anthropic", "enabled": true, "inputPerM": 5.50, "outputPerM": 27.50, "serves": ["explore"], "capabilities": { "transport": "bedrock-runtime", "api": "converse", "toolUse": true, "streaming": true, "imageInput": true, "structuredOutputs": false, "promptCaching": true, "contextWindow": 1000000, "maxOutput": 128000 } },
+      { "alias": "fable", "bedrockId": "us.anthropic.claude-fable-5-1", "vendor": "anthropic", "enabled": false, "inputPerM": 11.00, "outputPerM": 55.00, "serves": ["explore"], "capabilities": { "transport": "bedrock-runtime", "api": "converse", "toolUse": true, "streaming": true, "imageInput": true, "structuredOutputs": false, "promptCaching": true, "contextWindow": 1000000, "maxOutput": 128000 } }
+    ],
     "fallbacks": {
       "$comment": "When the probe says a rung is not entitled on this account, try these Bedrock IDs in order before dropping the rung.",
       "us.anthropic.claude-opus-5": [
@@ -82,7 +104,7 @@
     "home": "~/.hablo",
     "provider": "bedrouter",
     "model": null,
-    "$comment2": "model: what `hablo` passes as --model when you pass none; null = the chosen ladder's auto alias (auto / auto-oss). --cli-model overrides."
+    "$comment2": "model: what `hablo` passes as --model when you pass none; null = auto. --cli-model overrides."
   },
   "openwiki": {
     "npmPackage": "openwiki",
@@ -101,6 +123,8 @@
     "crewDispatch": "firstmate/crew-dispatch.json",
     "captainPolicy": "firstmate/captain-branch-policy.md",
     "openwikiPolicy": "firstmate/captain-openwiki-policy.md",
+    "tonePolicy": "firstmate/captain-tone-policy.md",
+    "ticketPolicy": "firstmate/captain-ticket-policy.md",
     "baseBranch": "develop",
     "$comment3": "baseBranch: the integration branch ticket branches are cut from and merged back into (--base-branch overrides). The policy never targets the repository's default branch directly.",
     "backend": null,
@@ -114,6 +138,35 @@
     },
     "$comment2": "backend: null keeps firstmate's auto-detection (tmux). Set \"herdr\" (or pass --backend herdr) to write config/backend."
   },
+  "jira": {
+    "$comment": "Shared Jira reporting CLI and labelled-ticket dispatch agent. Credentials live only in envFile.",
+    "enabled": true,
+    "home": "~/.hablo/jira",
+    "envFile": "~/.hablo/jira/.env",
+    "envVars": ["JIRA_URL", "JIRA_EMAIL", "JIRA_API_TOKEN"],
+    "projects": {
+      "HABLO": { "dir": "~/projects/ai/HABLO-installer", "baseBranch": "main", "mode": "direct-PR", "statuses": { "inProgress": "In Progress", "inReview": "In Review" } }
+    },
+    "reporting": { "enabled": true, "transitions": true, "stages": ["triage", "spec", "tests", "implementation", "review", "done"] },
+    "agent": {
+      "enabled": true,
+      "binName": "hablo-jira-agent",
+      "intervalSeconds": 20,
+      "labels": { "ready": "agent-ready", "running": "agent-running", "done": "agent-done", "failed": "agent-failed" },
+      "jqlExtra": "statusCategory != Done",
+      "maxConcurrent": 1,
+      "maxAttempts": 3,
+      "runTimeoutMinutes": 240,
+      "commentOnDispatch": true,
+      "reporterAllowlist": [],
+      "service": { "kind": "auto", "launchdLabel": "dev.hablo.jira-agent", "systemdUnit": "hablo-jira-agent" }
+    }
+  },
+  "receipt": {
+    "$comment": "Install provenance consumed by the future uninstall command. Runs append atomically. retainRuns is reserved for phase B; phase A never discards the oldest prior value needed for a correct revert.",
+    "path": "~/.hablo/receipt.json",
+    "retainRuns": 50
+  },
   "backup": {
     "$comment": "What `backup` archives and `--restore` puts back. essentials: state that cannot be regenerated and is not in dotfiles. history (only with --with-history): sessions, caches, logs.",
     "essentials": [
@@ -121,6 +174,7 @@
       ".pi/agent/trust.json",
       ".bedrouter/.env",
       ".bedrouter/bedrouter.json"
+      ,".hablo/jira/.env"
     ],
     "history": [
       ".pi/agent/sessions",
@@ -136,9 +190,13 @@
       ".pi/agent/pi-bedrouter.json",
       ".pi/agent/workflows.json",
       ".pi/agent/agents",
+      ".pi/agent/extensions/hablo-tone.ts",
       ".pi/workflows",
       ".local/bin/hablo",
-      ".hablo"
+      ".hablo/hablo-captain.ts",
+      ".hablo/tone.md"
+      ,".hablo/jira/config.json"
+      ,".hablo/jira/brief.tmpl.md"
     ],
     "$comment2": "config: normally regenerated by dotfiles or this installer; archived anyway (cheap) and restored only where missing."
   }

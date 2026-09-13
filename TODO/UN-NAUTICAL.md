@@ -1,22 +1,22 @@
 # Plain talk policy for firstmate (drop the nautical voice)
 
-> Status: buildable spec. Every decision below is settled. The three items under
+> Status: implemented; live model-behaviour sign-off remains. The three items under
 > "Verify in a live session" are behaviour checks, not design choices; they
 > cannot be answered by reading code, and they gate the sign-off rather than the
 > build.
 
-- [ ] Write `firstmate/captain-tone-policy.md`, with the inner `TONE-RULE` markers (text is in this document)
-- [ ] Add `"tonePolicy"` to the `firstmate` block in `hablo.json`
-- [ ] `install.mjs` step 9: `captainBlock("TONE-POLICY", …)`, gated on `--nautical` / `--no-tone-policy`
-- [ ] `install.mjs` step 10: render the inner rule to `~/.hablo/tone.md`, or delete it under `--nautical`
-- [ ] Write `pi/extensions/hablo-tone.ts`; install it to `~/.pi/agent/extensions/`
-- [ ] Rewrite the `hablo-captain.ts` preamble: no "first mate", no "voyage", no "captain" for the user
-- [ ] `hablo-captain.ts`: append the tone rule after the AGENTS.md manual, and drop the anchor from the status line
-- [ ] Edit the five nautical or misaddressed lines in the two existing policy files (table below)
-- [ ] Edit the one line in `firstmate/crew-dispatch.json`
-- [ ] Add `--nautical` and `--no-tone-policy` to the usage header
-- [ ] Add `.hablo/tone.md` and `.pi/agent/extensions/hablo-tone.ts` to `backup.config`
-- [ ] Document the flag in `README.md`, next to the other policy flags
+- [x] Write `firstmate/captain-tone-policy.md`, with the inner `TONE-RULE` markers (text is in this document)
+- [x] Add `"tonePolicy"` to the `firstmate` block in `hablo.json`
+- [x] `install.mjs` step 9: `captainBlock("TONE-POLICY", …)`, gated on `--nautical` / `--no-tone-policy`
+- [x] `install.mjs` step 10: render the inner rule to `~/.hablo/tone.md`, or delete it under `--nautical`
+- [x] Write `pi/extensions/hablo-tone.ts`; install it to `~/.pi/agent/extensions/`
+- [x] Rewrite the `hablo-captain.ts` preamble: no "first mate", no "voyage", no "captain" for the user
+- [x] `hablo-captain.ts`: append the tone rule after the AGENTS.md manual, and drop the anchor from the status line
+- [x] Edit the five nautical or misaddressed lines in the two existing policy files (table below)
+- [x] Edit the one line in `firstmate/crew-dispatch.json`
+- [x] Add `--nautical` and `--no-tone-policy` to the usage header
+- [x] Add `.hablo/tone.md` and `.pi/agent/extensions/hablo-tone.ts` to `backup.config`
+- [x] Document the flag in `README.md`, next to the other policy flags
 - [ ] Verify in a live session: the captain, a crewmate PR, and `--nautical`
 
 ## What this is
@@ -42,7 +42,7 @@ problem, so removing the title is the fix. "I opened the PR against PROJ-123",
 never "Aye captain, the PR is opened."
 
 **On by default, `--nautical` opts back in.** A bare `./install.sh` writes the
-block and the rule file. `--nautical` skips both and removes a rule file an
+block and the rule file. `--nautical` removes both the marked block and a rule file an
 earlier run installed. `--no-tone-policy` is the same switch under the spelling
 that matches `--no-branch-policy` and `--no-openwiki-policy`; keep both, and
 document `--nautical` as the one people remember.
@@ -218,10 +218,21 @@ Step 10, next to the `hablo-captain.ts` install, because that is where
 A step-9 skip must not leave a step-10 rule file behind, so read the same `tone`
 value in both steps rather than testing the flags twice.
 
+Implementation note: the disabled path also removes an existing marked
+`HABLO:TONE-POLICY` block. Merely skipping `captainBlock` would leave the policy
+active after a previous default install.
+
 `backup.config` gains `.hablo/tone.md` and
 `.pi/agent/extensions/hablo-tone.ts`. The usage header gains both flag spellings.
 
 ## Verify in a live session
+
+Verified on 2026-09-13 with Pi 0.85.1's real RPC loader: passing an explicit
+`-e` extension still loaded a probe from `~/.pi/agent/extensions/`. The captain
+extension also appended the rendered tone rule after the firstmate manual, and
+the crewmate extension appended it only for an `FM_TASK_ID` session. The three
+language-output checks below remain for sign-off because they require model
+turns and a real crewmate report.
 
 Three checks, and none of them can be done by reading code. Run them before
 ticking the last box.
