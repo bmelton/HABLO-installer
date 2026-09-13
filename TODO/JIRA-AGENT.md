@@ -5,13 +5,15 @@
 > and the `@file` argument behaviour are the two things written from memory; both
 > must be checked against a real instance before the code depends on them.
 >
-> This document is the Jira-to-agent direction. `TODO/JIRA.md` is the
-> agent-to-Jira direction (progress comments over MCP). They share a tracker and
-> nothing else. Build either one first.
+> This document is the Jira-to-agent direction. [JIRA.md](JIRA.md) is the
+> agent-to-Jira direction (agents comment on the ticket as each stage finishes).
+> They share a Go module, a credential file, and the `jira` block in
+> `hablo.json`, so the client, the ADF walker, and the project map are built
+> once. Either document can ship first; the second one inherits that half.
 
 - [ ] Verify the Jira Cloud search endpoint, its request body, and its pagination
 - [ ] Verify that `pi` expands `@path` in a positional message argument
-- [ ] `jira-agent/`: `go.mod`, `Taskfile.yml`, `main.go`, `internal/*` skeleton
+- [ ] `jira/`: one Go module, `cmd/hablo-jira-agent`, shared `internal/*` skeleton (see [JIRA.md](JIRA.md))
 - [ ] `internal/config`: load `config.json`, load the env file, validate every path
 - [ ] `internal/jira`: search, read one issue, add and remove labels, add a comment
 - [ ] `internal/adf`: Atlassian Document Format to Markdown, with golden tests
@@ -21,9 +23,9 @@
 - [ ] `report`: the subcommand the captain calls when the ticket is finished
 - [ ] `status` and `doctor` subcommands
 - [ ] `--dry-run`: print the claim writes and the tmux command, write nothing
-- [ ] `jira-agent/brief.tmpl.md`: the captain's opening message
+- [ ] `jira/brief.tmpl.md`: the captain's opening message
 - [ ] Unit tests against an `httptest` Jira stub, plus ADF fixtures
-- [ ] Add the `jiraAgent` block to `hablo.json`
+- [ ] Add the `jira` block (shared with [JIRA.md](JIRA.md)) to `hablo.json`
 - [ ] `install.mjs` step 12: build the binary, render `config.json`, install the template
 - [ ] `install.mjs` step 12: write and load the launchd agent or the systemd user timer
 - [ ] `install.mjs` preflight: report the Go toolchain, skip the step with a warning when absent
@@ -83,9 +85,10 @@ unmapped key is a permanent failure with a comment that names the key. The map
 lives in the manifest, so adding a repository is a reviewed edit and a re-run of
 the installer, not a label anyone with Jira write access can type.
 
-**The source lives in `jira-agent/` in this repository and the installer builds
-it.** One commit changes the manifest, the installer step, and the daemon
-together. No release pipeline, no download, no checksum. The cost is a Go
+**The source lives in `jira/` in this repository and the installer builds it.**
+One module, two binaries: this daemon and the reporting CLI in
+[JIRA.md](JIRA.md). One commit changes the manifest, the installer step, and the
+daemon together. No release pipeline, no download, no checksum. The cost is a Go
 toolchain on the machine; preflight reports it and step 12 skips with a warning
 when it is missing, the same way the AWS step already behaves.
 
@@ -103,42 +106,49 @@ no dotenv library: parsing `KEY=value` lines is twenty lines with a test.
 
 A new top-level block in `hablo.json`. The installer renders it, with `~`
 expanded and the interval and label overrides applied, to
-`~/.hablo/jira-agent/config.json`, which is the only file the daemon reads.
+`~/.hablo/jira/config.json`, which is the only file the daemon reads.
 
 ```jsonc
 {
-  "jiraAgent": {
-    "$comment": "Polls Jira for tickets assigned to the token owner and labelled 'agent-ready', then starts a hablo captain in a detached tmux session in the mapped repository. Credentials are never stored here: the daemon reads them from envFile, which `task secrets` populates from Infisical.",
+  "jira": {
+    "$comment": "Shared by hablo-jira (agents report progress, see JIRA.md) and hablo-jira-agent (this daemon). Credentials are never stored here: both binaries read envFile, which `task secrets` populates from Infisical.",
     "enabled": true,
-    "binName": "hablo-jira-agent",
-    "home": "~/.hablo/jira-agent",
-    "envFile": "~/.hablo/jira-agent/.env",
+    "home": "~/.hablo/jira",
+    "envFile": "~/.hablo/jira/.env",
     "envVars": ["JIRA_URL", "JIRA_EMAIL", "JIRA_API_TOKEN"],
-    "intervalSeconds": 20,
-    "labels": {
-      "ready": "agent-ready",
-      "running": "agent-running",
-      "done": "agent-done",
-      "failed": "agent-failed"
-    },
-    "jqlExtra": "statusCategory != Done",
-    "maxConcurrent": 1,
-    "maxAttempts": 3,
-    "runTimeoutMinutes": 240,
-    "commentOnDispatch": true,
-    "reporterAllowlist": [],
     "projects": {
-      "PROJ": { "dir": "~/code/foo", "baseBranch": "develop", "mode": "direct-PR" },
-      "OPS":  { "dir": "~/code/ops", "baseBranch": "main",    "mode": "direct-PR" }
+      "PROJ": { "dir": "~/code/foo", "baseBranch": "develop", "mode": "direct-PR", "statuses": { "inProgress": "In Progress", "inReview": "In Review" } },
+      "OPS":  { "dir": "~/code/ops", "baseBranch": "main",    "mode": "direct-PR", "statuses": { "inProgress": "In Progress", "inReview": "In Review" } }
     },
-    "service": {
-      "kind": "auto",
-      "launchdLabel": "dev.hablo.jira-agent",
-      "systemdUnit": "hablo-jira-agent"
+    "agent": {
+      "enabled": true,
+      "binName": "hablo-jira-agent",
+      "intervalSeconds": 20,
+      "labels": {
+        "ready": "agent-ready",
+        "running": "agent-running",
+        "done": "agent-done",
+        "failed": "agent-failed"
+      },
+      "jqlExtra": "statusCategory != Done",
+      "maxConcurrent": 1,
+      "maxAttempts": 3,
+      "runTimeoutMinutes": 240,
+      "commentOnDispatch": true,
+      "reporterAllowlist": [],
+      "service": {
+        "kind": "auto",
+        "launchdLabel": "dev.hablo.jira-agent",
+        "systemdUnit": "hablo-jira-agent"
+      }
     }
   }
 }
 ```
+
+`projects`, `envFile`, and `home` sit above `agent` because the reporting CLI in
+[JIRA.md](JIRA.md) reads the same three. One project map, one credential file,
+one place to add a repository.
 
 `projects` doubles as the project allowlist: the generated JQL names exactly
 these keys, so a ticket in any other project is never even returned.
@@ -150,10 +160,10 @@ forbids it.
 ### Files the daemon owns
 
 ```
-~/.hablo/jira-agent/
+~/.hablo/jira/
   config.json          rendered by the installer, never hand-edited
   .env                 mode 0600, from Infisical via `task secrets`
-  brief.tmpl.md        installed from jira-agent/brief.tmpl.md
+  brief.tmpl.md        installed from jira/brief.tmpl.md
   run.lock             flock; a tick that cannot take it exits 0
   state.json           per-key attempts, backoff-until, last outcome
   log/agent.log        slog text output, rotated at 8 MB, three files kept
@@ -284,7 +294,7 @@ tmux pipe-pane -o -t "hablo-PROJ-123" "cat >> $RUN/console.log"
 #!/bin/sh
 # written by hablo-jira-agent; one ticket, one session
 export HABLO_JIRA_KEY="PROJ-123"
-export HABLO_JIRA_RUN="/Users/you/.hablo/jira-agent/runs/PROJ-123"
+export HABLO_JIRA_RUN="/Users/you/.hablo/jira/runs/PROJ-123"
 export HABLO_PROJECT_MODE="direct-PR"
 cd "/Users/you/code/foo" || exit 1
 exec hablo -- "@$HABLO_JIRA_RUN/brief.md"
@@ -302,7 +312,7 @@ the obvious way for a human to look in, and makes liveness a single
 
 ### The brief
 
-`jira-agent/brief.tmpl.md` holds the opening message. It states the facts and
+`jira/brief.tmpl.md` holds the opening message. It states the facts and
 the two contracts, and it does not restate policy that already lives in
 `data/captain.md`. Duplicated policy is policy that drifts.
 
@@ -366,18 +376,23 @@ branch anyone can see.
 ## The binary
 
 ```
-jira-agent/
-  go.mod                  module github.com/<you>/hablo-installer/jira-agent
+jira/
+  go.mod                  module github.com/<you>/hablo-installer/jira
   Taskfile.yml            build, test, lint, run, secrets, install
-  main.go                 flag parsing and subcommand dispatch only
+  cmd/hablo-jira-agent/   this daemon: flag parsing and subcommand dispatch only
+  cmd/hablo-jira/         the reporting CLI (JIRA.md)
   brief.tmpl.md
   internal/config/        config.json, the env file, path validation
-  internal/jira/          client, search, issue, labels, comments
-  internal/adf/           ADF to Markdown
+  internal/jira/          client, search, issue, labels, comments, transitions
+  internal/adf/           ADF to Markdown, and Markdown to ADF for comment bodies
   internal/state/         run directories, flock, attempts and backoff
   internal/dispatch/      guards, brief rendering, tmux
   testdata/               Jira responses, ADF documents, golden Markdown
 ```
+
+Two binaries, one module. `internal/jira` and `internal/adf` are exactly what the
+reporting CLI needs, and a second client against the same API would be a second
+thing to keep correct.
 
 Subcommands:
 
@@ -411,7 +426,7 @@ installer and are non-fatal on failure.
 
 macOS, `~/Library/LaunchAgents/dev.hablo.jira-agent.plist`, with
 `ProgramArguments` of the absolute binary path plus `tick`, `StartInterval 20`,
-`RunAtLoad true`, and both output streams to `~/.hablo/jira-agent/log/launchd.log`.
+`RunAtLoad true`, and both output streams to `~/.hablo/jira/log/launchd.log`.
 Loaded with `launchctl bootout gui/$UID/dev.hablo.jira-agent` followed by
 `launchctl bootstrap gui/$UID <plist>`, which is idempotent and works on a
 re-run.
@@ -432,18 +447,18 @@ New step 12, after the tool dependencies. It behaves like the steps around it:
 it prints what it did, it never overwrites a file that lacks the `HABLO` marker,
 and it warns rather than exits.
 
-1. Skip entirely on `--skip-jira-agent`, or when `jiraAgent.enabled` is false.
+1. Skip entirely on `--skip-jira-agent`, or when `jira.agent.enabled` is false.
 2. Find the Go toolchain. Missing, or older than 1.22, means a warning and a skip,
    with the install hint. Preflight also reports it, alongside `pi` and `aws`.
-3. `go build -trimpath -o <binDir>/hablo-jira-agent ./jira-agent`, run from this
+3. `go build -trimpath -o <binDir>/hablo-jira-agent ./jira/cmd/hablo-jira-agent`, run from this
    checkout, with the module cache left alone.
-4. Render `config.json` into `~/.hablo/jira-agent/`, with `~` expanded, the
+4. Render `config.json` into `~/.hablo/jira/`, with `~` expanded, the
    interval and label overrides applied, and every mapped repository checked for
    existence. A missing repository is a printed note, not a failure: the machine
    may not have cloned it yet.
 5. Install `brief.tmpl.md` with the same `installFile` helper step 10 uses, so a
    hand-edited template survives.
-6. Create `~/.hablo/jira-agent/{log,runs}`. Create `.env` at mode 0600 only when
+6. Create `~/.hablo/jira/{log,runs}`. Create `.env` at mode 0600 only when
    it is absent, containing the three variable names with empty values and a
    comment pointing at `task secrets`. Never write a value.
 7. Write and load the launchd agent or the systemd user timer, unless
@@ -456,9 +471,9 @@ New flags, and the usage header lines to match:
 `--jira-agent-label <name>`, `--no-jira-agent-service`,
 `--jira-agent-bin-dir <dir>` (defaults to `cli.binDir`).
 
-`backup.config` gains `.hablo/jira-agent/config.json` and
-`.hablo/jira-agent/brief.tmpl.md`. `backup.essentials` gains
-`.hablo/jira-agent/.env`, which is the one file here that cannot be regenerated.
+`backup.config` gains `.hablo/jira/config.json` and
+`.hablo/jira/brief.tmpl.md`. `backup.essentials` gains
+`.hablo/jira/.env`, which is the one file here that cannot be regenerated.
 `runs/` and `log/` are archived by neither. The uninstall receipt in
 `TODO/UNINSTALL-PI-AND-EVERYTHING.md` records the binary path, both unit paths,
 and whether this installer created the home directory, because an uninstall must
@@ -534,14 +549,14 @@ live check and a human runs it.
 They can ship in either order and neither blocks the other.
 
 - The daemon writes lifecycle labels and three comments per ticket: dispatched,
-  finished, failed. `TODO/JIRA.md` gives the agents the narrative comments for
-  each pipeline stage.
-- Only `TODO/JIRA.md` transitions the ticket status. The daemon never does.
-- The daemon authenticates with an API token over REST, in Go. The reporter
-  authenticates over MCP, from inside Pi. They share the credential names and
-  nothing else. Doing both means the token is used by two clients, which is fine,
-  and means `TODO/JIRA.md`'s option B environment path is already satisfied on
-  any machine where this daemon is installed.
+  finished, failed. [JIRA.md](JIRA.md) gives the agents the narrative comments
+  for each pipeline stage.
+- Only [JIRA.md](JIRA.md) transitions the ticket status. The daemon never does.
+- Both authenticate with the same API token over REST, through the same
+  `internal/jira` client, reading the same `~/.hablo/jira/.env`. One credential,
+  one client, two callers: the daemon on a timer and `hablo-jira` from an agent's
+  shell. Whichever ships first leaves the other with only its own subcommands to
+  write.
 
 ## Verify before you build
 
