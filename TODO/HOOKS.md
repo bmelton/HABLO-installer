@@ -2,6 +2,10 @@
 
 > Status: capture, not a finished spec. The rules below are the thinking so far.
 > Flesh out the schema and the rule lists before anyone writes code.
+>
+> This document owns the rules and the Pi extension. The Claude Code engine for
+> the same rules is [CLAUDE-CODE-GUARD.md](CLAUDE-CODE-GUARD.md). Both read one
+> policy file, so a rule written here applies to both agents.
 
 - [ ] Design the `guard` block schema in `hablo.json`
 - [ ] Write `pi/extensions/hablo-guard.ts`
