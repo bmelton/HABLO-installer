@@ -6,6 +6,8 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
+	"strconv"
 	"strings"
 	"text/template"
 
@@ -34,7 +36,9 @@ func Preflight(p config.Project, dry bool) error {
 	}
 	for _, x := range []string{"tmux", "pi", "hablo", "git", "gh"} {
 		if _, e := exec.LookPath(x); e != nil {
-			return fmt.Errorf("%s is not on PATH", x)
+			// Naming the PATH matters: under launchd or systemd this fails on a machine where the interactive shell
+			// finds the tool, and the scheduler's minimal PATH is the only clue to why.
+			return fmt.Errorf("%s is not on PATH (PATH=%s)", x, os.Getenv("PATH"))
 		}
 	}
 	if e := exec.Command("gh", "auth", "status").Run(); e != nil {
@@ -95,4 +99,54 @@ func Alive(key string) bool {
 func Kill(key string) { _ = exec.Command("tmux", "kill-session", "-t", "hablo-"+key).Run() }
 func FromIssue(x jira.Issue, p config.Project, description string) Brief {
 	return Brief{Key: x.Key, Summary: x.Fields.Summary, IssueType: x.Fields.IssueType.Name, Priority: x.Fields.Priority.Name, Reporter: x.Fields.Reporter.DisplayName, Dir: p.Dir, BaseBranch: p.BaseBranch, Mode: p.Mode, Description: description}
+}
+
+// tmux records what a terminal emulator would have consumed, so a captured pane or a piped log is mostly escape
+// sequences. This matches OSC strings (hyperlinks and titles, terminated by BEL or ST), CSI sequences (colour, cursor
+// motion, the synchronised-update pairs Pi emits), two-byte escapes, and stray control bytes.
+var terminalNoise = regexp.MustCompile(`\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)?|\x1b\[[0-9;?]*[ -/]*[@-~]|\x1b[@-Z\\-_]|[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]`)
+
+// StripTerminal reduces recorded terminal output to the text a human would have read on screen.
+func StripTerminal(s string) string { return terminalNoise.ReplaceAllString(s, "") }
+
+// Readable strips escape sequences, treats a carriage return as a line break so in-place redraws become separate
+// lines, then drops blanks and collapses consecutive duplicates. A spinner that redrew a thousand times becomes one
+// line instead of a thousand.
+func Readable(s string) []string {
+	s = StripTerminal(strings.ReplaceAll(strings.ReplaceAll(s, "\r\n", "\n"), "\r", "\n"))
+	var out []string
+	for _, line := range strings.Split(s, "\n") {
+		line = strings.TrimRight(line, " \t")
+		if strings.TrimSpace(line) == "" {
+			continue
+		}
+		if len(out) > 0 && out[len(out)-1] == line {
+			continue
+		}
+		out = append(out, line)
+	}
+	return out
+}
+
+// Capture returns the live pane contents for a key. scrollback asks tmux for that many lines of history above the
+// visible screen; zero captures only what is on screen now.
+func Capture(key string, scrollback int) (string, error) {
+	if !Alive(key) {
+		return "", fmt.Errorf("no live tmux session for %s", key)
+	}
+	args := []string{"capture-pane", "-p", "-t", "hablo-" + key}
+	if scrollback > 0 {
+		args = append(args, "-S", "-"+strconv.Itoa(scrollback))
+	}
+	b, e := exec.Command("tmux", args...).Output()
+	if e != nil {
+		return "", fmt.Errorf("capture-pane: %w", e)
+	}
+	return b2s(b), nil
+}
+func b2s(b []byte) string { return strings.Join(Readable(string(b)), "\n") }
+
+// ConsoleLog is the full recording tmux pipe-pane writes for a run, which outlives the session.
+func ConsoleLog(home, key string) string {
+	return filepath.Join(state.RunDir(home, key), "console.log")
 }

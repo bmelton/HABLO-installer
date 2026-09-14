@@ -682,6 +682,17 @@ else {
 }
 
 // ---- 13 Jira reporting and dispatch -------------------------------------------------------------------------------------
+// launchd and systemd hand a scheduled job a minimal PATH holding none of Homebrew, ~/.local/bin, or a node version
+// manager, so the Jira dispatch preflight reports tmux/pi/hablo/gh as missing on a machine whose shell finds all four,
+// and Dream silently skips the same tools. Pin the directories they occupy now instead of inheriting the default.
+const serviceTools = ["tmux", "pi", "hablo", "git", "gh"];
+const missingServiceTools = serviceTools.filter((t) => !which(t));
+const servicePath = [...new Set([
+  expand(opt("jira-agent-bin-dir", manifest.cli.binDir)), expand(manifest.cli.binDir),
+  ...serviceTools.map(which).filter(Boolean).map((p) => path.dirname(p)),
+  "/opt/homebrew/bin", "/usr/local/bin", "/usr/bin", "/bin", "/usr/sbin", "/sbin",
+])].join(":");
+
 step(13, "Jira reporting and labelled-ticket dispatch");
 const jira = structuredClone(manifest.jira ?? {});
 const jiraOff = flag("skip-jira") || flag("no-tracker") || jira.enabled === false;
@@ -729,17 +740,18 @@ else {
     if (!DRY) fs.chmodSync(jira.envFile, 0o600);
     did(`create ${jira.envFile} (mode 0600)`);
   }
+  if (missingServiceTools.length) warn(`dispatch preflight needs ${missingServiceTools.join(", ")} on PATH; tickets will fail until installed`);
   const agentBin = path.join(jiraBinDir, jira.agent.binName ?? "hablo-jira-agent");
   if (!agentSkipped && !flag("no-jira-agent-service")) {
     if (process.platform === "darwin") {
       const label = jira.agent.service.launchdLabel;
       const plist = path.join(home, "Library", "LaunchAgents", `${label}.plist`);
-      const xml = `<?xml version="1.0" encoding="UTF-8"?>\n<!-- managed by HABLO -->\n<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">\n<plist version="1.0"><dict><key>Label</key><string>${label}</string><key>ProgramArguments</key><array><string>${agentBin}</string><string>tick</string></array><key>StartInterval</key><integer>${jira.agent.intervalSeconds}</integer><key>RunAtLoad</key><true/><key>StandardOutPath</key><string>${path.join(jiraHome, "log", "launchd.log")}</string><key>StandardErrorPath</key><string>${path.join(jiraHome, "log", "launchd.log")}</string></dict></plist>\n`;
+      const xml = `<?xml version="1.0" encoding="UTF-8"?>\n<!-- managed by HABLO -->\n<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">\n<plist version="1.0"><dict><key>Label</key><string>${label}</string><key>ProgramArguments</key><array><string>${agentBin}</string><string>tick</string></array><key>StartInterval</key><integer>${jira.agent.intervalSeconds}</integer><key>RunAtLoad</key><true/><key>EnvironmentVariables</key><dict><key>PATH</key><string>${servicePath}</string></dict><key>StandardOutPath</key><string>${path.join(jiraHome, "log", "launchd.log")}</string><key>StandardErrorPath</key><string>${path.join(jiraHome, "log", "launchd.log")}</string></dict></plist>\n`;
       writeText(plist, xml); did(`install ${plist}`);
       if (!DRY) { run("launchctl", ["bootout", `gui/${process.getuid()}/${label}`]); const r = run("launchctl", ["bootstrap", `gui/${process.getuid()}`, plist]); if (r.status !== 0) warn(`launchctl bootstrap failed: ${(r.stderr || "").trim()}`); else record({ kind: "service.load", name: label, path: homePath(plist) }); }
     } else if (process.platform === "linux") {
       const unit = jira.agent.service.systemdUnit; const userDir = path.join(home, ".config", "systemd", "user");
-      writeText(path.join(userDir, `${unit}.service`), `[Unit]\nDescription=HABLO Jira agent\n[Service]\nType=oneshot\nExecStart=${agentBin} tick\n`);
+      writeText(path.join(userDir, `${unit}.service`), `[Unit]\nDescription=HABLO Jira agent\n[Service]\nType=oneshot\nEnvironment=PATH=${servicePath}\nExecStart=${agentBin} tick\n`);
       writeText(path.join(userDir, `${unit}.timer`), `[Unit]\nDescription=Poll Jira for HABLO work\n[Timer]\nOnBootSec=1min\nOnUnitActiveSec=${jira.agent.intervalSeconds}s\nAccuracySec=1s\n[Install]\nWantedBy=timers.target\n`);
       did(`install and enable ${unit}.timer`); if (!DRY) { run("systemctl", ["--user", "daemon-reload"]); const r=run("systemctl", ["--user", "enable", "--now", `${unit}.timer`]); if(r.status!==0)warn(`systemd timer enable failed: ${(r.stderr||"").trim()}`); else record({kind:"service.load",name:`${unit}.timer`,path:homePath(path.join(userDir,`${unit}.timer`))}); }
     }
@@ -780,12 +792,12 @@ else {
     if (process.platform === "darwin") {
       const label = dream.service.launchdLabel;
       const plist = path.join(home, "Library", "LaunchAgents", `${label}.plist`);
-      const xml = `<?xml version="1.0" encoding="UTF-8"?>\n<!-- managed by HABLO -->\n<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">\n<plist version="1.0"><dict><key>Label</key><string>${label}</string><key>ProgramArguments</key><array><string>${dreamBin}</string><string>run</string></array><key>StartCalendarInterval</key><dict><key>Hour</key><integer>${hour}</integer><key>Minute</key><integer>${minute}</integer></dict><key>StandardOutPath</key><string>${path.join(dreamHome, "service.log")}</string><key>StandardErrorPath</key><string>${path.join(dreamHome, "service.log")}</string></dict></plist>\n`;
+      const xml = `<?xml version="1.0" encoding="UTF-8"?>\n<!-- managed by HABLO -->\n<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">\n<plist version="1.0"><dict><key>Label</key><string>${label}</string><key>ProgramArguments</key><array><string>${dreamBin}</string><string>run</string></array><key>EnvironmentVariables</key><dict><key>PATH</key><string>${servicePath}</string></dict><key>StartCalendarInterval</key><dict><key>Hour</key><integer>${hour}</integer><key>Minute</key><integer>${minute}</integer></dict><key>StandardOutPath</key><string>${path.join(dreamHome, "service.log")}</string><key>StandardErrorPath</key><string>${path.join(dreamHome, "service.log")}</string></dict></plist>\n`;
       writeText(plist, xml); did(`install ${plist}`);
       if (!DRY) { run("launchctl", ["bootout", `gui/${process.getuid()}/${label}`]); const r = run("launchctl", ["bootstrap", `gui/${process.getuid()}`, plist]); if (r.status !== 0) warn(`Dream launchctl bootstrap failed: ${(r.stderr || "").trim()}`); else record({ kind: "service.load", name: label, path: homePath(plist) }); }
     } else if (process.platform === "linux") {
       const unit = dream.service.systemdUnit, userDir = path.join(home, ".config", "systemd", "user");
-      writeText(path.join(userDir, `${unit}.service`), `[Unit]\nDescription=HABLO Dream correction digest\n[Service]\nType=oneshot\nExecStart=${dreamBin} run\n`);
+      writeText(path.join(userDir, `${unit}.service`), `[Unit]\nDescription=HABLO Dream correction digest\n[Service]\nType=oneshot\nEnvironment=PATH=${servicePath}\nExecStart=${dreamBin} run\n`);
       writeText(path.join(userDir, `${unit}.timer`), `[Unit]\nDescription=Run HABLO Dream daily\n[Timer]\nOnCalendar=*-*-* ${dream.service.at}:00\nPersistent=true\n[Install]\nWantedBy=timers.target\n`);
       did(`install and enable ${unit}.timer`); if (!DRY) { run("systemctl", ["--user", "daemon-reload"]); const r=run("systemctl", ["--user", "enable", "--now", `${unit}.timer`]); if(r.status!==0)warn(`Dream systemd timer enable failed: ${(r.stderr||"").trim()}`); else record({kind:"service.load",name:`${unit}.timer`,path:homePath(path.join(userDir,`${unit}.timer`))}); }
     }

@@ -50,6 +50,8 @@ func run(args []string, out, errout io.Writer) int {
 	outcome := fs.String("outcome", "", "")
 	pr := fs.String("pr", "", "")
 	summary := fs.String("summary", "", "")
+	follow := fs.Bool("follow", false, "")
+	lines := fs.Int("lines", 0, "")
 	if e := fs.Parse(args); e != nil {
 		return 2
 	}
@@ -77,6 +79,15 @@ func run(args []string, out, errout io.Writer) int {
 	if cmd == "status" {
 		a := app{cfg: cfg, out: out, dry: *dry, template: filepath.Join(cfg.Home, "brief.tmpl.md")}
 		if e := a.status(); e != nil {
+			fmt.Fprintln(errout, e)
+			return 1
+		}
+		return 0
+	}
+	// Before the enabled and credential checks: spy only reads tmux and the run directory, and explaining a run that is
+	// already underway must keep working even when the agent has been turned off.
+	if cmd == "spy" {
+		if e := spy(cfg.Home, *key, *lines, *follow, out); e != nil {
 			fmt.Fprintln(errout, e)
 			return 1
 		}
@@ -361,4 +372,99 @@ func contains(xs []string, x string) bool {
 		}
 	}
 	return false
+}
+
+// spy shows what a dispatched captain is doing. With no key it lists runs; with a key it prints the live pane, or
+// follows the console log. It needs neither Jira credentials nor the agent to be enabled, because its whole job is to
+// explain a run that is already underway.
+func spy(home, key string, lines int, follow bool, out io.Writer) error {
+	if key == "" {
+		return spyList(home, out)
+	}
+	if !config.ValidIssueKey(key) {
+		return fmt.Errorf("invalid Jira key %q", key)
+	}
+	if follow {
+		return spyFollow(dispatch.ConsoleLog(home, key), key, out)
+	}
+	if text, e := dispatch.Capture(key, lines); e == nil {
+		fmt.Fprintln(out, text)
+		return nil
+	}
+	// The session is gone, but pipe-pane wrote everything to disk, so a finished run is still readable.
+	b, e := os.ReadFile(dispatch.ConsoleLog(home, key))
+	if e != nil {
+		return fmt.Errorf("no live session for %s and no console log: %w", key, e)
+	}
+	all := dispatch.Readable(string(b))
+	if lines > 0 && len(all) > lines {
+		all = all[len(all)-lines:]
+	}
+	fmt.Fprintf(out, "%s is not running; last %d lines of its recording:\n\n", key, len(all))
+	fmt.Fprintln(out, strings.Join(all, "\n"))
+	return nil
+}
+
+func spyList(home string, out io.Writer) error {
+	entries, e := os.ReadDir(filepath.Join(home, "runs"))
+	if e != nil {
+		return e
+	}
+	found := 0
+	for _, d := range entries {
+		if !d.IsDir() {
+			continue
+		}
+		k := d.Name()
+		status, idle := "exited", "-"
+		if dispatch.Alive(k) {
+			status = "running"
+		}
+		if fi, e := os.Stat(dispatch.ConsoleLog(home, k)); e == nil {
+			idle = time.Since(fi.ModTime()).Round(time.Second).String()
+		}
+		fmt.Fprintf(out, "%-12s %-8s quiet for %s\n", k, status, idle)
+		found++
+	}
+	if found == 0 {
+		fmt.Fprintln(out, "no runs recorded")
+	}
+	return nil
+}
+
+func spyFollow(path, key string, out io.Writer) error {
+	f, e := os.Open(path)
+	if e != nil {
+		return fmt.Errorf("no recording for %s: %w", key, e)
+	}
+	defer f.Close()
+	var last string
+	emit := func(chunk string) {
+		for _, line := range dispatch.Readable(chunk) {
+			if line == last {
+				continue
+			}
+			last = line
+			fmt.Fprintln(out, line)
+		}
+	}
+	b, _ := io.ReadAll(f)
+	emit(string(b))
+	// Poll rather than watch: a run is minutes long, the file only ever grows, and this keeps the command free of a
+	// filesystem-notification dependency.
+	for {
+		time.Sleep(500 * time.Millisecond)
+		b, e := io.ReadAll(f)
+		if e != nil {
+			return e
+		}
+		if len(b) > 0 {
+			emit(string(b))
+			continue
+		}
+		if !dispatch.Alive(key) {
+			fmt.Fprintf(out, "\n-- %s is no longer running --\n", key)
+			return nil
+		}
+	}
 }
