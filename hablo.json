@@ -146,8 +146,9 @@
     "envSource": "~/.config/secrets/JIRA",
     "$comment4": "envSource: an existing KEY=VALUE file to link envFile at, so the secret keeps one home on disk (--jira-env overrides; \"\" disables). Missing source, or an envFile already there, falls back to the stub from jira/env.example.",
     "envVars": ["JIRA_URL", "JIRA_EMAIL", "JIRA_API_TOKEN"],
+    "$comment5": "projects is keyed by the Jira issue-key prefix, never the project name: ProjectFor splits HAB-1 and looks up HAB. A name/key mismatch makes the agent find a ticket and then refuse it as unmapped.",
     "projects": {
-      "HABLO": { "dir": "~/projects/ai/HABLO-installer", "baseBranch": "main", "mode": "direct-PR", "statuses": { "inProgress": "In Progress", "inReview": "In Review" } }
+      "HAB": { "dir": "~/projects/ai/HABLO-installer", "baseBranch": "main", "mode": "direct-PR", "statuses": { "inProgress": "In Progress", "inReview": "In Review" } }
     },
     "reporting": { "enabled": true, "transitions": true, "stages": ["triage", "spec", "tests", "implementation", "review", "done"] },
     "agent": {

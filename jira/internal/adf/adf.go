@@ -116,17 +116,40 @@ func render(n Node, depth int) string {
 func FromMarkdown(s string) Document {
 	lines := strings.Split(strings.TrimSpace(s), "\n")
 	content := make([]Node, 0)
-	var para []string
-	flush := func() {
+	var para, items []string
+	flushPara := func() {
 		if len(para) > 0 {
 			content = append(content, Node{Type: "paragraph", Content: []Node{{Type: "text", Text: strings.Join(para, "\n")}}})
 			para = nil
 		}
 	}
+	flushList := func() {
+		if len(items) == 0 {
+			return
+		}
+		li := make([]Node, 0, len(items))
+		for _, it := range items {
+			li = append(li, Node{Type: "listItem", Content: []Node{{Type: "paragraph", Content: []Node{{Type: "text", Text: it}}}}})
+		}
+		content = append(content, Node{Type: "bulletList", Content: li})
+		items = nil
+	}
+	flush := func() { flushPara(); flushList() }
 	for _, line := range lines {
-		if strings.TrimSpace(line) == "" {
+		t := strings.TrimSpace(line)
+		switch {
+		case t == "":
 			flush()
-		} else {
+		case headingLevel(t) > 0:
+			flush()
+			n := headingLevel(t)
+			content = append(content, Node{Type: "heading", Attrs: map[string]any{"level": n}, Content: []Node{{Type: "text", Text: strings.TrimSpace(t[n+1:])}}})
+		case isBullet(t):
+			// A bullet ends a paragraph but continues an open list, so consecutive items stay one bulletList.
+			flushPara()
+			items = append(items, strings.TrimSpace(t[2:]))
+		default:
+			flushList()
 			para = append(para, line)
 		}
 	}
@@ -135,4 +158,20 @@ func FromMarkdown(s string) Document {
 		content = []Node{{Type: "paragraph", Content: []Node{{Type: "text", Text: ""}}}}
 	}
 	return Document{Type: "doc", Version: 1, Content: content}
+}
+
+// headingLevel reports the ATX heading depth of a trimmed line, or 0 when it is not a heading. A run of more than six
+// hashes, or one with no space after it, is body text in Markdown and must stay a paragraph.
+func headingLevel(t string) int {
+	n := 0
+	for n < len(t) && t[n] == '#' {
+		n++
+	}
+	if n == 0 || n > 6 || n >= len(t) || t[n] != ' ' {
+		return 0
+	}
+	return n
+}
+func isBullet(t string) bool {
+	return len(t) > 2 && (t[0] == '-' || t[0] == '*') && t[1] == ' '
 }

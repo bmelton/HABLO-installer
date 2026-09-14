@@ -206,7 +206,24 @@ The Jira `.env` is deliberately excluded from `backup`, because `backup` archive
 
 The agent picks up credential changes on its own. The scheduler runs `hablo-jira-agent tick` as a fresh process every `agent.intervalSeconds`, and each process loads the file at startup, so no restart is needed.
 
-Run `hablo-jira doctor --key HABLO-123` to verify authentication and workflow transitions, then add `agent-ready` to an assigned ticket. Useful demo commands are `hablo-jira-agent tick --dry-run`, `hablo-jira-agent tick`, `hablo-jira-agent status`, and `tmux attach -t hablo-HABLO-123`. On macOS, stop automatic polling with `launchctl bootout gui/$UID/dev.hablo.jira-agent`; on Linux use `systemctl --user disable --now hablo-jira-agent.timer`.
+### Creating tickets
+
+`hablo-jira create` files a ticket from the command line, so a dispatch loop never needs the web form.
+
+```sh
+hablo-jira create --template > ticket.md        # scaffold the expected shape
+hablo-jira create --project HAB \
+  --summary "Smoke test: create HELLO.md" \
+  --body @ticket.md
+```
+
+The ticket is assigned to the token owner by default, because the dispatch JQL requires `assignee = currentUser()` and an unassigned ticket is skipped with no error anywhere. `--ready` adds the configured ready label so the agent claims it on the next tick; without it the ticket is filed and left alone. `--type` sets the issue type (default `Task`).
+
+Descriptions should carry a `## Background / Context` section explaining why the work exists, and a `## Acceptance Criteria` section listing checkable outcomes. `create` warns when either heading is absent but still files the ticket. Markdown headings and `-` bullets are converted to real ADF nodes, so they render as formatting in Jira rather than literal `##` characters. An empty description is refused outright, since the dispatcher rejects those anyway.
+
+`--sprint` names the sprint to place the issue in, default `To Schedule`, and the sprint is created on the project's scrum board when no sprint by that name exists. Pass `--sprint ""` to skip. A project with only a kanban board has no sprints at all; that is reported as a note and the issue stays in the backlog.
+
+Run `hablo-jira doctor --key HAB-1` to verify authentication and workflow transitions, then add `agent-ready` to an assigned ticket. Useful demo commands are `hablo-jira-agent tick --dry-run`, `hablo-jira-agent tick`, `hablo-jira-agent status`, and `tmux attach -t hablo-HAB-1`. On macOS, stop automatic polling with `launchctl bootout gui/$UID/dev.hablo.jira-agent`; on Linux use `systemctl --user disable --now hablo-jira-agent.timer`.
 
 Ticket descriptions are untrusted prompts running with the developer account's local access. Use a dedicated/scoped Jira identity where possible, keep project mappings narrow, and retain `direct-PR` so a human reviews all changes. The Wave 2 guard will add another enforcement layer; Jira dispatch does not wait for it.
 

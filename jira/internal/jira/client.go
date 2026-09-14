@@ -178,3 +178,76 @@ func (c *Client) UpdateLabels(ctx context.Context, key string, remove, add []str
 	}
 	return c.request(ctx, "PUT", "/rest/api/3/issue/"+url.PathEscape(key), map[string]any{"update": map[string]any{"labels": ops}}, nil, true)
 }
+
+// CreateIssue opens an issue and returns its key. Assignee is set in the same call so the issue is never briefly
+// visible unassigned, which the dispatch JQL would skip.
+func (c *Client) CreateIssue(ctx context.Context, project, summary, description, issueType, assigneeID string, labels []string) (string, error) {
+	fields := map[string]any{
+		"project":   map[string]string{"key": project},
+		"summary":   summary,
+		"issuetype": map[string]string{"name": issueType},
+	}
+	if strings.TrimSpace(description) != "" {
+		fields["description"] = adf.FromMarkdown(description)
+	}
+	if assigneeID != "" {
+		fields["assignee"] = map[string]string{"accountId": assigneeID}
+	}
+	if len(labels) > 0 {
+		fields["labels"] = labels
+	}
+	var x struct {
+		Key string `json:"key"`
+	}
+	e := c.request(ctx, "POST", "/rest/api/3/issue", map[string]any{"fields": fields}, &x, true)
+	return x.Key, e
+}
+
+type Board struct {
+	ID   int    `json:"id"`
+	Name string `json:"name"`
+	Type string `json:"type"`
+}
+type Sprint struct {
+	ID    int    `json:"id"`
+	Name  string `json:"name"`
+	State string `json:"state"`
+}
+
+// BoardForProject returns the project's first scrum board. A project with only a kanban board has no sprints at all,
+// so the caller is told which it is rather than being handed a board that cannot hold one.
+func (c *Client) BoardForProject(ctx context.Context, project string) (Board, error) {
+	var x struct {
+		Values []Board `json:"values"`
+	}
+	if e := c.request(ctx, "GET", "/rest/agile/1.0/board?projectKeyOrId="+url.QueryEscape(project), nil, &x, false); e != nil {
+		return Board{}, e
+	}
+	for _, b := range x.Values {
+		if strings.EqualFold(b.Type, "scrum") {
+			return b, nil
+		}
+	}
+	return Board{}, fmt.Errorf("no scrum board for project %s", project)
+}
+
+// Sprints lists the board's active and future sprints, oldest first. Closed sprints are excluded: nothing should be
+// scheduled into one.
+func (c *Client) Sprints(ctx context.Context, boardID int) ([]Sprint, error) {
+	var x struct {
+		Values []Sprint `json:"values"`
+	}
+	e := c.request(ctx, "GET", fmt.Sprintf("/rest/agile/1.0/board/%d/sprint?state=active,future", boardID), nil, &x, false)
+	return x.Values, e
+}
+func (c *Client) CreateSprint(ctx context.Context, boardID int, name string) (Sprint, error) {
+	var x Sprint
+	e := c.request(ctx, "POST", "/rest/agile/1.0/sprint", map[string]any{"name": name, "originBoardId": boardID}, &x, true)
+	return x, e
+}
+
+// MoveToSprint uses the agile endpoint rather than writing the Sprint custom field, whose customfield_NNNNN id differs
+// between Jira sites.
+func (c *Client) MoveToSprint(ctx context.Context, sprintID int, key string) error {
+	return c.request(ctx, "POST", fmt.Sprintf("/rest/agile/1.0/sprint/%d/issue", sprintID), map[string]any{"issues": []string{key}}, nil, true)
+}

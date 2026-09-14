@@ -42,3 +42,49 @@ func TestFromMarkdown(t *testing.T) {
 		t.Fatalf("unexpected document: %#v", d)
 	}
 }
+
+func TestFromMarkdownStructure(t *testing.T) {
+	d := FromMarkdown("## Background / Context\n\nWhy this exists.\n\n## Acceptance Criteria\n\n- first\n- second\n\ntrailing text\n")
+	types := []string{}
+	for _, n := range d.Content {
+		types = append(types, n.Type)
+	}
+	want := []string{"heading", "paragraph", "heading", "bulletList", "paragraph"}
+	if len(types) != len(want) {
+		t.Fatalf("node types = %v, want %v", types, want)
+	}
+	for i := range want {
+		if types[i] != want[i] {
+			t.Fatalf("node types = %v, want %v", types, want)
+		}
+	}
+	if lvl := d.Content[0].Attrs["level"]; lvl != 2 {
+		t.Fatalf("heading level = %v, want 2", lvl)
+	}
+	if got := d.Content[0].Content[0].Text; got != "Background / Context" {
+		t.Fatalf("heading text = %q", got)
+	}
+	if n := len(d.Content[3].Content); n != 2 {
+		t.Fatalf("bulletList items = %d, want 2", n)
+	}
+	if got := d.Content[3].Content[0].Content[0].Content[0].Text; got != "first" {
+		t.Fatalf("first item = %q", got)
+	}
+}
+
+func TestFromMarkdownNonHeadings(t *testing.T) {
+	// "#hashtag" has no space and "####### x" is seven deep; both are body text in Markdown, not headings.
+	for _, s := range []string{"#hashtag", "####### too deep", "a - b"} {
+		d := FromMarkdown(s)
+		if d.Content[0].Type != "paragraph" {
+			t.Fatalf("%q became %s, want paragraph", s, d.Content[0].Type)
+		}
+	}
+}
+
+func TestFromMarkdownRoundTrip(t *testing.T) {
+	src := "## Acceptance Criteria\n\n- one\n- two"
+	if got := Markdown(FromMarkdown(src)); got != src {
+		t.Fatalf("round trip = %q, want %q", got, src)
+	}
+}

@@ -21,7 +21,7 @@ const version = "0.1.0"
 func main() { os.Exit(run(os.Args[1:], os.Stdout, os.Stderr)) }
 func run(args []string, out, errout io.Writer) int {
 	if len(args) == 0 {
-		fmt.Fprintln(errout, "usage: hablo-jira <comment|transition|read|search|doctor|version>")
+		fmt.Fprintln(errout, "usage: hablo-jira <comment|transition|read|search|create|doctor|version>")
 		return 4
 	}
 	if args[0] == "version" {
@@ -40,8 +40,18 @@ func run(args []string, out, errout io.Writer) int {
 	limit := fs.Int("limit", 50, "")
 	dry := fs.Bool("dry-run", false, "")
 	quiet := fs.Bool("quiet", false, "")
+	project := fs.String("project", "", "")
+	summary := fs.String("summary", "", "")
+	issueType := fs.String("type", "Task", "")
+	sprint := fs.String("sprint", defaultSprint, "")
+	ready := fs.Bool("ready", false, "")
+	template := fs.Bool("template", false, "")
 	if e := fs.Parse(args[1:]); e != nil {
 		return 4
+	}
+	if args[0] == "create" && *template {
+		fmt.Fprint(out, ticketTemplate)
+		return 0
 	}
 	c, cred, e := config.Load(*cfgPath)
 	if e != nil || !c.Enabled || !cred.Complete() {
@@ -144,6 +154,52 @@ func run(args []string, out, errout io.Writer) int {
 		for _, x := range xs {
 			fmt.Fprintf(out, "%s\t%s\t%s\n", x.Key, x.Fields.Status.Name, x.Fields.Summary)
 		}
+	case "create":
+		if *project == "" || *summary == "" || *body == "" {
+			return fail(fmt.Errorf("create requires --project, --summary, and --body (see --template)"))
+		}
+		raw, e := readBody(*body)
+		if e != nil {
+			return fail(e)
+		}
+		if strings.TrimSpace(raw) == "" {
+			return fail(fmt.Errorf("description is empty; the dispatcher rejects such tickets"))
+		}
+		// Advisory, never fatal: a ticket without these reads poorly to a captain, but refusing to file it would make
+		// the CLI harder to use than the web form it replaces.
+		if missing := missingSections(raw); len(missing) > 0 && !*quiet {
+			fmt.Fprintf(errout, "warning: description has no %s heading; scaffold one with --template\n", strings.Join(missing, " or no "))
+		}
+		u, e := client.Myself(ctx)
+		if e != nil {
+			return fail(e)
+		}
+		var labels []string
+		if *ready {
+			// Without a configured ready label this would file a blank label, which Jira accepts and the dispatch JQL
+			// can never match.
+			if c.Agent.Labels.Ready == "" {
+				return fail(fmt.Errorf("--ready needs agent.labels.ready in the config"))
+			}
+			labels = append(labels, c.Agent.Labels.Ready)
+		}
+		newKey, e := client.CreateIssue(ctx, *project, *summary, raw, *issueType, u.AccountID, labels)
+		if e != nil {
+			return fail(e)
+		}
+		if *dry {
+			fmt.Fprintln(out, "dry run: no issue created")
+			return 0
+		}
+		fmt.Fprintf(out, "%s created (assigned to %s)\n", newKey, fallback(u.EmailAddress, u.DisplayName))
+		if *sprint != "" {
+			if e := assignSprint(ctx, client, *project, *sprint, newKey, out); e != nil {
+				fmt.Fprintf(errout, "note: %v; issue left in the backlog\n", e)
+			}
+		}
+		if *ready {
+			fmt.Fprintf(out, "labelled %s; the agent will claim it within the poll interval\n", c.Agent.Labels.Ready)
+		}
 	case "doctor":
 		u, e := client.Myself(ctx)
 		if e != nil {
@@ -212,4 +268,72 @@ func contains(xs []string, x string) bool {
 		}
 	}
 	return false
+}
+
+const defaultSprint = "To Schedule"
+
+const ticketTemplate = `## Background / Context
+
+Why this work exists: the problem, who hit it, and what currently happens.
+
+## Acceptance Criteria
+
+- A specific, checkable outcome
+- Another one, stated so that a reviewer can confirm it without asking
+`
+
+var requiredSections = []string{"Background / Context", "Acceptance Criteria"}
+
+// missingSections names the guideline headings absent from a description. It matches the heading text only, so the
+// level of the heading and any trailing punctuation do not matter.
+func missingSections(body string) []string {
+	var out []string
+	for _, want := range requiredSections {
+		found := false
+		for _, line := range strings.Split(body, "\n") {
+			t := strings.TrimSpace(line)
+			if !strings.HasPrefix(t, "#") {
+				continue
+			}
+			if strings.EqualFold(strings.TrimSpace(strings.TrimLeft(t, "# ")), want) {
+				found = true
+				break
+			}
+		}
+		if !found {
+			out = append(out, want)
+		}
+	}
+	return out
+}
+
+// assignSprint puts the issue in the named sprint, creating that sprint when the board has none by that name. A
+// project without a scrum board reports an error the caller downgrades to a note: the issue is already filed.
+func assignSprint(ctx context.Context, client *japi.Client, project, name, key string, out io.Writer) error {
+	b, e := client.BoardForProject(ctx, project)
+	if e != nil {
+		return e
+	}
+	ss, e := client.Sprints(ctx, b.ID)
+	if e != nil {
+		return e
+	}
+	for _, s := range ss {
+		if strings.EqualFold(s.Name, name) {
+			if e := client.MoveToSprint(ctx, s.ID, key); e != nil {
+				return e
+			}
+			fmt.Fprintf(out, "sprint: %s\n", s.Name)
+			return nil
+		}
+	}
+	s, e := client.CreateSprint(ctx, b.ID, name)
+	if e != nil {
+		return e
+	}
+	if e := client.MoveToSprint(ctx, s.ID, key); e != nil {
+		return e
+	}
+	fmt.Fprintf(out, "sprint: %s (created)\n", s.Name)
+	return nil
 }
