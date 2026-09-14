@@ -7,8 +7,8 @@ import (
 	"path/filepath"
 	"strconv"
 
-	"github.com/bmelton/hablo-installer/dream/internal/app"
-	"github.com/bmelton/hablo-installer/dream/internal/config"
+	"github.com/bmelton/HABLO-installer/dream/internal/app"
+	"github.com/bmelton/HABLO-installer/dream/internal/config"
 )
 
 const version = "0.1.0"

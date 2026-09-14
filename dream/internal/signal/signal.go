@@ -12,8 +12,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/bmelton/hablo-installer/dream/internal/cluster"
-	"github.com/bmelton/hablo-installer/dream/internal/model"
+	"github.com/bmelton/HABLO-installer/dream/internal/cluster"
+	"github.com/bmelton/HABLO-installer/dream/internal/model"
 )
 
 type Turn struct {

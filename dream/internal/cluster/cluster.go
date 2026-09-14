@@ -5,7 +5,7 @@ import (
 	"strings"
 	"unicode"
 
-	"github.com/bmelton/hablo-installer/dream/internal/model"
+	"github.com/bmelton/HABLO-installer/dream/internal/model"
 )
 
 func TextKey(s string) string {

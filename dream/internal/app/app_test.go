@@ -9,12 +9,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/bmelton/hablo-installer/dream/internal/cluster"
-	"github.com/bmelton/hablo-installer/dream/internal/config"
-	"github.com/bmelton/hablo-installer/dream/internal/model"
-	"github.com/bmelton/hablo-installer/dream/internal/pisession"
-	"github.com/bmelton/hablo-installer/dream/internal/redact"
-	"github.com/bmelton/hablo-installer/dream/internal/signal"
+	"github.com/bmelton/HABLO-installer/dream/internal/cluster"
+	"github.com/bmelton/HABLO-installer/dream/internal/config"
+	"github.com/bmelton/HABLO-installer/dream/internal/model"
+	"github.com/bmelton/HABLO-installer/dream/internal/pisession"
+	"github.com/bmelton/HABLO-installer/dream/internal/redact"
+	"github.com/bmelton/HABLO-installer/dream/internal/signal"
 )
 
 func TestGoldenDigest(t *testing.T) {

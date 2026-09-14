@@ -10,7 +10,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/bmelton/hablo-installer/dream/internal/model"
+	"github.com/bmelton/HABLO-installer/dream/internal/model"
 )
 
 func command(dir, name string, args ...string) (string, error) {

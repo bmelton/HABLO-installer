@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/bmelton/hablo-installer/dream/internal/model"
+	"github.com/bmelton/HABLO-installer/dream/internal/model"
 )
 
 // ReviewComments is the optional phase-2 source. It uses the already-authenticated gh CLI.

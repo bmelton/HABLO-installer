@@ -16,15 +16,15 @@ import (
 	"strings"
 	"time"
 
-	"github.com/bmelton/hablo-installer/dream/internal/ccsession"
-	"github.com/bmelton/hablo-installer/dream/internal/cluster"
-	"github.com/bmelton/hablo-installer/dream/internal/config"
-	ghsignal "github.com/bmelton/hablo-installer/dream/internal/github"
-	"github.com/bmelton/hablo-installer/dream/internal/model"
-	"github.com/bmelton/hablo-installer/dream/internal/pisession"
-	"github.com/bmelton/hablo-installer/dream/internal/redact"
-	"github.com/bmelton/hablo-installer/dream/internal/signal"
-	"github.com/bmelton/hablo-installer/dream/internal/state"
+	"github.com/bmelton/HABLO-installer/dream/internal/ccsession"
+	"github.com/bmelton/HABLO-installer/dream/internal/cluster"
+	"github.com/bmelton/HABLO-installer/dream/internal/config"
+	ghsignal "github.com/bmelton/HABLO-installer/dream/internal/github"
+	"github.com/bmelton/HABLO-installer/dream/internal/model"
+	"github.com/bmelton/HABLO-installer/dream/internal/pisession"
+	"github.com/bmelton/HABLO-installer/dream/internal/redact"
+	"github.com/bmelton/HABLO-installer/dream/internal/signal"
+	"github.com/bmelton/HABLO-installer/dream/internal/state"
 )
 
 type App struct {
