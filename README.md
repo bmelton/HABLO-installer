@@ -54,6 +54,7 @@ Then: `pi --provider bedrouter --model auto`. For firstmate: `cd <your project> 
 | `--skip-jira-agent` | Install Jira reporting but not the dispatch agent |
 | `--jira-agent-interval <seconds>` `--jira-agent-label <name>` | Override the dispatch poll interval or ready label |
 | `--no-jira-agent-service` `--jira-agent-bin-dir <dir>` | Build without activating the scheduler, or change the binary directory |
+| `--jira-env <path>` | Link `~/.hablo/jira/.env` to an existing `KEY=VALUE` secrets file instead of writing a stub (default `jira.envSource` in the manifest; only applies when `.env` is absent) |
 | `--skip-dream` | Skip the Dream binary, configuration, and timer |
 | `--dream-at HH:MM` `--no-dream-service` | Set the daily local run time (default `03:00`), or install Dream without activating its timer |
 | `--force-agents` | Overwrite existing agent profiles / workflows with the bundled ones |
@@ -183,13 +184,27 @@ Step 13 installs two zero-dependency Go binaries. `hablo-jira` lets captains and
 
 Edit the `jira.projects` map in `hablo.json` before installation. Each Jira project key maps to a local Git checkout, its integration branch, and its firstmate delivery mode. The generated query only includes mapped projects, tickets assigned to the token owner, the configured ready label, and non-Done statuses.
 
-Create an Atlassian API token, then put these values in `~/.hablo/jira/.env` (mode 0600):
+Create an Atlassian API token. The credentials live in `~/.hablo/jira/.env`, which the binaries read directly; they never fall back to the process environment, so exporting these in your shell does nothing for the scheduled agent.
 
 ```sh
 JIRA_URL=https://yourcompany.atlassian.net
 JIRA_EMAIL=you@example.com
 JIRA_API_TOKEN=...
 ```
+
+`JIRA_URL` is the site origin and needs the scheme. The client appends `/rest/api/3/...` itself, so do not add a path.
+
+Step 13 fills that file one of three ways, in order:
+
+1. If `~/.hablo/jira/.env` already exists, it is left alone.
+2. Otherwise, if `jira.envSource` names a file that exists (default `~/.config/secrets/JIRA`, overridable with `--jira-env <path>`, disabled with `""`), `.env` becomes a symlink to it. The secret keeps one home on disk, and re-running the installer will not disturb it. Keep the source at mode 0600; the installer warns when it is readable more widely.
+3. Otherwise, a stub is written at mode 0600 for you to fill in.
+
+From a linked Infisical project, `cd jira && task secrets` writes the real file instead, at umask 077. That replaces the symlink, so choose one route.
+
+The Jira `.env` is deliberately excluded from `backup`, because `backup` archives with `tar -h` and would dereference a link to your secret store into the archive. Restore it from `envSource` or `task secrets`.
+
+The agent picks up credential changes on its own. The scheduler runs `hablo-jira-agent tick` as a fresh process every `agent.intervalSeconds`, and each process loads the file at startup, so no restart is needed.
 
 Run `hablo-jira doctor --key HABLO-123` to verify authentication and workflow transitions, then add `agent-ready` to an assigned ticket. Useful demo commands are `hablo-jira-agent tick --dry-run`, `hablo-jira-agent tick`, `hablo-jira-agent status`, and `tmux attach -t hablo-HABLO-123`. On macOS, stop automatic polling with `launchctl bootout gui/$UID/dev.hablo.jira-agent`; on Linux use `systemctl --user disable --now hablo-jira-agent.timer`.
 

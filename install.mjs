@@ -14,6 +14,7 @@
 //                    [--skip-tools] [--update-tools]   firstmate's tool dependencies (treehouse, no-mistakes, *-axi)
 //                    [--skip-jira|--no-tracker] [--skip-jira-agent] [--jira-agent-interval <s>]
 //                    [--jira-agent-label <name>] [--no-jira-agent-service] [--jira-agent-bin-dir <dir>]
+//                    [--jira-env <path>]
 //                    [--skip-dream] [--dream-at HH:MM] [--no-dream-service]
 //                    [--install-pi] [--pi-manager npm|bun|pnpm]   install the Pi CLI itself when it is missing
 //
@@ -694,6 +695,7 @@ else {
   if (opt("jira-agent-label", "")) jira.agent.labels.ready = opt("jira-agent-label", jira.agent.labels.ready);
   jira.home = jiraHome;
   jira.envFile = expand(jira.envFile);
+  jira.envSource = expand(opt("jira-env", jira.envSource ?? ""));
   for (const p of Object.values(jira.projects ?? {})) {
     p.dir = expand(p.dir);
     if (!fs.existsSync(p.dir)) note(`mapped Jira repository is not cloned yet: ${p.dir}`);
@@ -710,7 +712,23 @@ else {
   const templateDst = path.join(jiraHome, "brief.tmpl.md");
   if (!fs.existsSync(templateDst) || /HABLO|Work Jira ticket/.test(fs.readFileSync(templateDst, "utf8"))) { writeText(templateDst, fs.readFileSync(path.join(here, "jira", "brief.tmpl.md"), "utf8")); did(`install ${templateDst}`); }
   else note(`${templateDst} is hand-edited; leaving it`);
-  if (!fs.existsSync(jira.envFile)) { writeText(jira.envFile, fs.readFileSync(path.join(here, "jira", "env.example"), "utf8")); if (!DRY) fs.chmodSync(jira.envFile, 0o600); did(`create ${jira.envFile} (mode 0600)`); }
+  // lstat, not existsSync: a link whose target is gone must count as present, or writeText would follow it and write
+  // the stub over the secret store's path.
+  const envPresent = (() => { try { fs.lstatSync(jira.envFile); return true; } catch { return false; } })();
+  if (envPresent) note(`${jira.envFile} already exists; leaving it`);
+  else if (jira.envSource && fs.existsSync(jira.envSource)) {
+    const mode = fs.statSync(jira.envSource).mode & 0o077;
+    if (mode) warn(`${jira.envSource} is readable beyond your account (mode ${(fs.statSync(jira.envSource).mode & 0o777).toString(8)}); chmod 600 it`);
+    // Not recorded in the receipt: uninstall never unlinks a symlink anyway, and a hash of this file would be a hash
+    // of the API token.
+    did(`link ${jira.envFile} -> ${jira.envSource}`);
+    if (!DRY) fs.symlinkSync(jira.envSource, jira.envFile);
+  } else {
+    if (jira.envSource) note(`${jira.envSource} not found; writing the stub instead`);
+    writeText(jira.envFile, fs.readFileSync(path.join(here, "jira", "env.example"), "utf8"));
+    if (!DRY) fs.chmodSync(jira.envFile, 0o600);
+    did(`create ${jira.envFile} (mode 0600)`);
+  }
   const agentBin = path.join(jiraBinDir, jira.agent.binName ?? "hablo-jira-agent");
   if (!agentSkipped && !flag("no-jira-agent-service")) {
     if (process.platform === "darwin") {
@@ -727,7 +745,7 @@ else {
     }
   } else note(agentSkipped ? "dispatch agent skipped; reporting CLI installed" : "service skipped (--no-jira-agent-service)");
   const envText = fs.existsSync(jira.envFile) ? fs.readFileSync(jira.envFile, "utf8") : "";
-  if (jira.envVars.every((k) => new RegExp(`^${k}=.+$`, "m").test(envText)) && !DRY) { const r=run(path.join(jiraBinDir,"hablo-jira"),["doctor"]); note((r.stdout||r.stderr).trim()); }
+  if (jira.envVars.every((k) => new RegExp(`^${k}=.+$`, "m").test(envText))) { if (DRY) note(`${jira.envFile} has all of ${jira.envVars.join(", ")}; would run hablo-jira doctor`); else { const r=run(path.join(jiraBinDir,"hablo-jira"),["doctor"]); note((r.stdout||r.stderr).trim()); } }
   else note("jira: not configured. Add JIRA_URL, JIRA_EMAIL, and JIRA_API_TOKEN to ~/.hablo/jira/.env; create a token at https://id.atlassian.com/manage-profile/security/api-tokens");
 }
 

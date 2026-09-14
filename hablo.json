@@ -143,6 +143,8 @@
     "enabled": true,
     "home": "~/.hablo/jira",
     "envFile": "~/.hablo/jira/.env",
+    "envSource": "~/.config/secrets/JIRA",
+    "$comment4": "envSource: an existing KEY=VALUE file to link envFile at, so the secret keeps one home on disk (--jira-env overrides; \"\" disables). Missing source, or an envFile already there, falls back to the stub from jira/env.example.",
     "envVars": ["JIRA_URL", "JIRA_EMAIL", "JIRA_API_TOKEN"],
     "projects": {
       "HABLO": { "dir": "~/projects/ai/HABLO-installer", "baseBranch": "main", "mode": "direct-PR", "statuses": { "inProgress": "In Progress", "inReview": "In Review" } }
@@ -202,8 +204,8 @@
       ".pi/agent/trust.json",
       ".bedrouter/.env",
       ".bedrouter/bedrouter.json"
-      ,".hablo/jira/.env"
     ],
+    "$comment3": "The Jira .env is deliberately absent: it holds an API token, and `backup` archives with tar -h, so a link to your secret store would be dereferenced into the archive. Restore it from envSource or `task secrets`.",
     "history": [
       ".pi/agent/sessions",
       ".pi/agent/models-store.json",
