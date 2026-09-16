@@ -429,3 +429,54 @@ test("Wave 5 accepts a pushed detached firstmate clone and rejects a branch with
     fs.rmSync(f.dir, { recursive: true, force: true });
   }
 });
+
+test("team stats stay off until the manifest or a flag names a repository", () => {
+  const f = fixture();
+  try {
+    const brHome = path.join(f.home, ".bedrouter");
+    const out = install(f, ["--home", brHome, "--skip-jira", "--skip-dream", "--skip-cli", "--skip-firstmate"]);
+    const cfg = JSON.parse(fs.readFileSync(path.join(brHome, "bedrouter.json"), "utf8"));
+    assert.equal(Object.hasOwn(cfg, "publish"), false, "no publish block means nothing can leave the machine");
+    assert.match(out, /publish: off/);
+    // The dashboard baseline is a shared value and travels with the stack.
+    assert.equal(Object.hasOwn(cfg.routing, "baselineAlias"), true);
+  } finally {
+    fs.rmSync(f.dir, { recursive: true, force: true });
+  }
+});
+
+test("a named stats repository renders the publish block and says what leaves the machine", () => {
+  const f = fixture();
+  try {
+    const brHome = path.join(f.home, ".bedrouter");
+    const out = install(f, ["--home", brHome, "--publish-repo", "acme/bedrouter-stats", "--publish-cred", "env",
+      "--skip-jira", "--skip-dream", "--skip-cli", "--skip-firstmate"]);
+    const cfg = JSON.parse(fs.readFileSync(path.join(brHome, "bedrouter.json"), "utf8"));
+    assert.deepEqual(cfg.publish, { enabled: true, repo: "acme/bedrouter-stats", branch: "main", intervalMs: 3600000, credential: "env" });
+    // The token is the personal half and must never be rendered into the shared config.
+    assert.equal(JSON.stringify(cfg).includes("BEDROUTER_PUBLISH_TOKEN"), false);
+    assert.match(out, /data\/<your-github-login>\/<date>\.json/);
+    assert.match(out, /turn it off with --skip-publish/);
+
+    // --skip-publish wins over the repository, and the block is removed again on the next run.
+    install(f, ["--home", brHome, "--publish-repo", "acme/bedrouter-stats", "--skip-publish",
+      "--skip-jira", "--skip-dream", "--skip-cli", "--skip-firstmate"]);
+    assert.equal(Object.hasOwn(JSON.parse(fs.readFileSync(path.join(brHome, "bedrouter.json"), "utf8")), "publish"), false);
+  } finally {
+    fs.rmSync(f.dir, { recursive: true, force: true });
+  }
+});
+
+test("an unattended run is never asked about the credential", () => {
+  const f = fixture();
+  try {
+    const brHome = path.join(f.home, ".bedrouter");
+    // stdin is not a TTY here, which is exactly the unattended case: it must take the default and continue.
+    const out = install(f, ["--home", brHome, "--publish-repo", "acme/bedrouter-stats",
+      "--skip-jira", "--skip-dream", "--skip-cli", "--skip-firstmate"]);
+    assert.equal(JSON.parse(fs.readFileSync(path.join(brHome, "bedrouter.json"), "utf8")).publish.credential, "auto");
+    assert.equal(/Use it to publish team stats/.test(out), false);
+  } finally {
+    fs.rmSync(f.dir, { recursive: true, force: true });
+  }
+});

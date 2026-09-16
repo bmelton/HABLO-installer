@@ -15,6 +15,7 @@
 //                    [--skip-jira|--no-tracker] [--skip-jira-agent] [--jira-agent-interval <s>]
 //                    [--jira-agent-label <name>] [--no-jira-agent-service] [--jira-agent-bin-dir <dir>]
 //                    [--jira-env <path>]
+//                    [--skip-publish] [--publish-repo <owner/name>] [--publish-cred gh|env|auto]   team stats
 //                    [--skip-dream] [--dream-at HH:MM] [--no-dream-service]
 //                    [--install-pi] [--pi-manager npm|bun|pnpm]   install the Pi CLI itself when it is missing
 //
@@ -23,7 +24,8 @@
 //   1 preflight   node, pi (installed globally with --install-pi when missing), aws, git; openwiki (advisory)
 //   2 packages    pi install npm:<pkg> for anything not yet in settings.json packages
 //   3 settings    enabledModels += bedrouter/*; a few UX settings; optional default model
-//   4 bedrouter   ~/.pi/agent/pi-bedrouter.json, ~/.bedrouter/.env and bedrouter.json (rendered from hablo.json)
+//   4 bedrouter   ~/.pi/agent/pi-bedrouter.json, ~/.bedrouter/.env and bedrouter.json (rendered from hablo.json),
+//                 including the team-stats publish block when the manifest names a repo
 //   5 aws         profile present? -> aws sso login; absent -> run `aws configure sso --profile <p>` (interactive)
 //   6 probe       probe each rung; try fallbacks, disable unavailable rungs, reconcile discoverable capabilities
 //   7 agents      agent profiles + workflows into ~/.pi (never overwrites without --force-agents)
@@ -382,12 +384,55 @@ if (cfg?.families) {
   did(`back up legacy ladder config to ${backup}`);
   cfg = null;
 }
+// Team stats. The repo, the branch and the interval are shared values and live in hablo.json, so a team install needs
+// no user input for them. The token is the personal half and never appears here: it comes from `gh` on the machine, or
+// from BEDROUTER_PUBLISH_TOKEN in ~/.bedrouter/.env. Same split as jira.envSource.
+const pubManifest = manifest.bedrouter.publish ?? {};
+const publishRepoFlag = opt("publish-repo", "");
+const publishRepo = publishRepoFlag || pubManifest.repo || "";
+// Naming a repo on the command line is itself the opt-in; otherwise the manifest decides.
+const publishOn = !flag("skip-publish") && !!publishRepo && (publishRepoFlag ? true : pubManifest.enabled !== false);
+const ghToken = () => { const r = run("gh", ["auth", "token", "--hostname", "github.com"]); return r.status === 0 ? r.stdout.trim() : ""; };
+const askOnce = (question, fallback) => {
+  // Only a TTY is ever asked, so an unattended run never blocks. --publish-cred answers it in advance.
+  if (DRY || !process.stdin.isTTY) return fallback;
+  process.stdout.write(question);
+  try { const buf = Buffer.alloc(256); const n = fs.readSync(0, buf, 0, 256, null); return buf.toString("utf8", 0, n).trim(); }
+  catch { return fallback; }
+};
+let publishCred = opt("publish-cred", "");
+if (publishOn && !publishCred) {
+  publishCred = pubManifest.credential ?? "auto";
+  if (ghToken()) {
+    const answer = askOnce(`  gh is authenticated for github.com. Use it to publish team stats? [Y/n] `, "");
+    if (/^n/i.test(answer)) publishCred = "env";
+  }
+}
+if (publishCred && !["auto", "gh", "env"].includes(publishCred)) fail(`--publish-cred must be auto, gh or env (got "${publishCred}")`);
+
 const renderedCfg = { stack: structuredClone(manifest.bedrouter.stack), aliases: {}, routing: structuredClone(manifest.bedrouter.routing) };
+if (publishOn) renderedCfg.publish = { enabled: true, repo: publishRepo, branch: pubManifest.branch ?? "main", intervalMs: pubManifest.intervalMs ?? 3600000, credential: publishCred || "auto" };
 if (!cfg || JSON.stringify(cfg) !== JSON.stringify(renderedCfg)) {
   cfg = renderedCfg;
   writeJson(cfgPath, cfg);
   did(`render ${cfgPath} from hablo.json (${cfg.stack.length} rungs, classifier ${cfg.routing.classifier.model})`);
 } else note(`${cfgPath} present (${cfg.stack.map((r) => r.alias).join(" > ")})`);
+
+// Publishing sends data off this machine, so what it sends and how to stop it are printed every run, not buried.
+if (!publishOn) {
+  note(`publish: off (${flag("skip-publish") ? "--skip-publish" : !publishRepo ? "no bedrouter.publish.repo in hablo.json" : "bedrouter.publish.enabled is false"})`);
+} else {
+  did(`publish team stats to ${publishRepo} (${renderedCfg.publish.branch}), hourly`);
+  note(`  writes one file per closed UTC day: data/<your-github-login>/<date>.json`);
+  note(`  counts and token sums only. No prompts, no conversation or session keys, no error text, nothing per request`);
+  note(`  see exactly what this machine would send:  bedrouter publish --dry-run`);
+  const token = publishCred === "env" ? "" : ghToken();
+  const envHasToken = /^BEDROUTER_PUBLISH_TOKEN=.+$/m.test(fs.existsSync(envPath) ? fs.readFileSync(envPath, "utf8") : "");
+  if (token) note(`  credential: gh`);
+  else if (envHasToken) note(`  credential: BEDROUTER_PUBLISH_TOKEN in ${homePath(envPath)}`);
+  else warn(`publishing is configured but this machine has no credential yet. Run \`gh auth login\`, or add BEDROUTER_PUBLISH_TOKEN to ${homePath(envPath)}. Nothing is published until then.`);
+  note(`  turn it off with --skip-publish`);
+}
 
 // ---- 5 aws ----------------------------------------------------------------------------------------------------------
 step(5, "aws credentials");

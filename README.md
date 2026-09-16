@@ -55,10 +55,60 @@ Then: `pi --provider bedrouter --model auto`. For firstmate: `cd <your project> 
 | `--jira-agent-interval <seconds>` `--jira-agent-label <name>` | Override the dispatch poll interval or ready label |
 | `--no-jira-agent-service` `--jira-agent-bin-dir <dir>` | Build without activating the scheduler, or change the binary directory |
 | `--jira-env <path>` | Link `~/.hablo/jira/.env` to an existing `KEY=VALUE` secrets file instead of writing a stub (default `jira.envSource` in the manifest; only applies when `.env` is absent) |
+| `--skip-publish` | Do not publish team stats, whatever `bedrouter.publish` in the manifest says |
+| `--publish-repo <owner/name>` | Publish to this stats repository, overriding the manifest. Naming one is itself the opt-in |
+| `--publish-cred gh\|env\|auto` | Where the publish token comes from. Answers the interactive question in advance, so an unattended run never blocks (default `auto`: `gh` when authenticated, else `BEDROUTER_PUBLISH_TOKEN`) |
 | `--skip-dream` | Skip the Dream binary, configuration, and timer |
 | `--dream-at HH:MM` `--no-dream-service` | Set the daily local run time (default `03:00`), or install Dream without activating its timer |
 | `--force-agents` | Overwrite existing agent profiles / workflows with the bundled ones |
 | `--dry-run` | Print, don't write |
+
+## Team stats: shared values are committed, personal ones are not
+
+Off by default. `bedrouter.publish.repo` in `hablo.json` is `null`, and nothing
+leaves any machine until a team sets it.
+
+The split is what makes a team rollout need no user input. Everything the whole
+team shares is a committed value in the manifest, and the one per-developer value
+is never in it:
+
+| Value | Where it lives | Set by |
+| --- | --- | --- |
+| Stats repository, branch, interval | `bedrouter.publish` in `hablo.json` | The team, once, committed |
+| Baseline rung for the savings figure | `bedrouter.routing.baselineAlias` | The team, once, committed |
+| The GitHub token | `gh` on the machine, or `BEDROUTER_PUBLISH_TOKEN` in `~/.bedrouter/.env` | Each developer, never committed |
+
+So a team sets the repository once:
+
+```json
+"publish": { "enabled": true, "repo": "acme/bedrouter-stats", "branch": "main", "intervalMs": 3600000, "credential": "auto" }
+```
+
+and every `./install.sh` after that renders it into `~/.bedrouter/bedrouter.json`
+and needs nothing from the person running it.
+
+The token resolves on the machine. `credential: "auto"` takes `gh auth token`
+when `gh` is authenticated for github.com, and otherwise reads
+`BEDROUTER_PUBLISH_TOKEN` from `~/.bedrouter/.env`. Because `gh` is already a
+firstmate requirement, most machines need no token created by hand.
+
+When `gh` is authenticated and `--publish-cred` was not given, an interactive
+install asks once whether to use it and records the answer. A non-interactive run
+is never asked: it takes `auto`, prints the source it found, and continues. A
+machine with no credential at all publishes nothing and says so.
+
+Step 4 prints what will leave the machine, where it goes, and how to stop it,
+every run. Before opting in, see exactly what your own machine would send:
+
+```sh
+bedrouter publish --dry-run
+```
+
+A day file carries counts and token sums only: no prompts, no conversation or
+session keys, no error text, and nothing per request. It does show that a named
+person worked on a given date and roughly how much, which in a public stats
+repository is world-readable. The stats repository's own README states that on
+its face.
 
 ## Backup, uninstall, reinstall
 

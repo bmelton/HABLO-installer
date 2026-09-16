@@ -60,11 +60,21 @@
       "enabled": true,
       "honorClientModel": false,
       "cacheHitRate": 0.8,
+      "$comment": "baselineAlias: the rung the dashboard prices the \"no router\" counterfactual at. null takes the dearest enabled rung that serves explore, which is what a client reaches for when there is no router.",
+      "baselineAlias": null,
       "classifier": {
         "enabled": true,
         "model": "nova-micro",
         "mode": "fallback"
       }
+    },
+    "publish": {
+      "$comment": "Team stats. A shared value: set `repo` and `enabled` once for the team, commit it, and every install picks it up with no user input. The token is the per-developer half and is never here: `credential` auto takes `gh auth token` when gh is authenticated, else BEDROUTER_PUBLISH_TOKEN from ~/.bedrouter/.env. The stats repo is public, so read its README before enabling: a day file shows that a named person worked on a date and roughly how much. Check what your machine would send with `bedrouter publish --dry-run`.",
+      "enabled": false,
+      "repo": null,
+      "branch": "main",
+      "intervalMs": 3600000,
+      "credential": "auto"
     },
     "stack": [
       { "alias": "nova-micro", "bedrockId": "us.amazon.nova-micro-v1:0", "vendor": "amazon", "enabled": true, "inputPerM": 0.035, "outputPerM": 0.14, "serves": ["trivial"], "capabilities": { "transport": "bedrock-runtime", "api": "converse", "toolUse": true, "streaming": true, "imageInput": false, "structuredOutputs": false, "promptCaching": true, "contextWindow": 128000, "maxOutput": 5000 } },
