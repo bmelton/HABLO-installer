@@ -480,10 +480,10 @@ function probeStep() {
     for (const { alias } of d) {
       const rung = cfg.stack.find((r) => r.alias === alias);
       if (!rung) continue;
-      const tried = triedByAlias.get(alias) ?? [rung.bedrockId];
+      const tried = triedByAlias.get(alias) ?? [rung.modelId];
       triedByAlias.set(alias, tried);
       const next = (manifest.bedrouter.fallbacks[tried[0]] ?? []).find((x) => !tried.includes(x));
-      if (next) { note(`${alias}: ${rung.bedrockId} not entitled -> trying ${next}`); rung.bedrockId = next; tried.push(next); }
+      if (next) { note(`${alias}: ${rung.modelId} not entitled -> trying ${next}`); rung.modelId = next; tried.push(next); }
       else {
         note(`${alias}: not entitled and no fallback left -> disabling the rung`);
         rung.enabled = false;
@@ -496,8 +496,9 @@ function probeStep() {
     d = denied();
   }
   for (const cls of ["trivial", "execute", "explore"]) if (!cfg.stack.some((r) => r.enabled && r.serves.includes(cls))) fail(`probe disabled the last rung serving ${cls}; enable or replace one in ${cfgPath}`);
-  if (awsBin && profile) for (const rung of cfg.stack.filter((r) => r.enabled)) {
-    const discoveryId = rung.bedrockId.replace(/^(us|eu|apac|global)\./, "");
+  // Only a Bedrock rung has Bedrock metadata to reconcile against.
+  if (awsBin && profile) for (const rung of cfg.stack.filter((r) => r.enabled && r.capabilities.transport === "bedrock-runtime")) {
+    const discoveryId = rung.modelId.replace(/^(us|eu|apac|global)\./, "");
     const meta = run("aws", ["bedrock", "get-foundation-model", "--model-identifier", discoveryId, "--region", manifest.bedrouter.region, "--profile", profile, "--output", "json"]);
     if (meta.status !== 0) continue;
     const details = readJsonText(meta.stdout)?.modelDetails;
