@@ -50,6 +50,12 @@ export default function (pi: ExtensionAPI) {
     "",
     `This session is firstmate's captain session for the project **${name}** at \`${project}\`, which is also your working directory; that project is what this session is about unless the user says otherwise. firstmate's code lives at \`${root}\` (FM_ROOT) and its home (state/, data/, config/, projects/) at \`${home}\` (FM_HOME); both are exported in the environment, and \`${root}/bin\` is on PATH. Every \`bin/fm-*.sh\` command in the manual below is spelled with its absolute path for that reason; run them as written, never relative to the working directory. The project is already registered in \`${home}/data/projects.md\` and \`${home}/projects/${name}\` is a symlink to it, so treat \`projects/${name}\` and \`${project}\` as the same place. Do not clone the project again.`,
     "",
+    // The rewrite above reaches AGENTS.md and nothing else. Skills under .agents/skills/ and the session-start nudge
+    // also name `bin/fm-*.sh`, and the nudge's wording is a fixed literal that the ahoy skill matches whole, so it
+    // cannot be rewritten at all. A relative path from either source runs in the project directory and exits 127,
+    // which reads convincingly as a missing file. State the general rule instead of patching each source.
+    `Some instructions reach you from outside that manual: firstmate's skills, and the session-start nudge, whose wording is fixed and cannot be rewritten. Those still say \`bin/fm-*.sh\`. **Any \`bin/fm-*.sh\` path, from any source, is relative to \`${root}\`, never to your working directory.** Run \`${root}/bin/fm-<name>.sh\`, or just \`fm-<name>.sh\` since \`${root}/bin\` is on PATH. A \`bin/fm-*.sh\` that exits 127 or reports "No such file or directory" means you ran it from the wrong directory: re-run it with the absolute path. It does not mean the script is missing, and it is never a reason to re-clone or reinstall firstmate.`,
+    "",
     "---",
     "",
     ...(model ? [
@@ -59,7 +65,8 @@ export default function (pi: ExtensionAPI) {
       "",
       `    --model ${model}`,
       "",
-      "That is the provider and model this captain is running, in Pi's `provider/id` form. `config/crew-dispatch.json` names the harness; this line names the model, and it is authoritative for this voyage. Do not substitute another model, and do not omit the flag: `bin/fm-spawn.sh` passes `--model` through only when you give it, and a crewmate launched without one falls back to Pi's default provider, which may not be this one.",
+      // Absolute, like everything else: this block is hardcoded here and never passes through the AGENTS.md rewrite.
+      `That is the provider and model this captain is running, in Pi's \`provider/id\` form. \`${root}/config/crew-dispatch.json\` names the harness; this line names the model, and it is authoritative for this voyage. Do not substitute another model, and do not omit the flag: \`${root}/bin/fm-spawn.sh\` passes \`--model\` through only when you give it, and a crewmate launched without one falls back to Pi's default provider, which may not be this one.`,
       "",
       "---",
       "",
