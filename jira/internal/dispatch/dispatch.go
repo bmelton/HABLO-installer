@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"strconv"
 	"strings"
 	"text/template"
@@ -22,10 +23,19 @@ type Brief struct {
 }
 type BriefComment struct{ Author, Created, Body string }
 
-func Preflight(p config.Project, dry bool) error {
+func Preflight(cfg config.Config, p config.Project, dry bool) error {
 	st, e := os.Stat(p.Dir)
 	if e != nil || !st.IsDir() {
 		return fmt.Errorf("repository does not exist: %s", p.Dir)
+	}
+	if root := cfg.EffectiveRoot(p); root != "" {
+		// Validate checked this at load, but a symlink in the path can change between then and this dispatch.
+		if !config.Within(root, p.Dir) {
+			return fmt.Errorf("project directory %s is outside root %s", p.Dir, root)
+		}
+		if !SandboxAvailable() && cfg.SandboxRequired() {
+			return fmt.Errorf("root %s cannot be enforced on %s: no sandbox-exec available; install one or set jira.requireSandbox=false to dispatch unconfined", root, runtime.GOOS)
+		}
 	}
 	cmd := exec.Command("git", "-C", p.Dir, "rev-parse", "--show-toplevel")
 	b, e := cmd.Output()
@@ -75,19 +85,26 @@ func Render(home, templatePath string, b Brief, dry bool) (string, error) {
 	p := filepath.Join(d, "brief.md")
 	return p, os.WriteFile(p, out.Bytes(), 0600)
 }
-func Launch(home string, p config.Project, key, brief string, dry bool) (string, error) {
-	d := state.RunDir(home, key)
+func Launch(cfg config.Config, p config.Project, key, brief string, dry bool) (string, error) {
+	d := state.RunDir(cfg.Home, key)
 	script := filepath.Join(d, "launch.sh")
 	log := filepath.Join(d, "console.log")
 	session := "hablo-" + key
 	text := fmt.Sprintf("#!/bin/sh\n# managed by HABLO\nexport HABLO_JIRA_KEY=%q\nexport HABLO_JIRA_RUN=%q\nexport HABLO_PROJECT_MODE=%q\ncd %q || exit 1\nexec hablo -- @%q\n", key, d, p.Mode, p.Dir, brief)
 	if dry {
+		if root := cfg.EffectiveRoot(p); root != "" && SandboxAvailable() {
+			return fmt.Sprintf("tmux new-session -d -s %q -c %q sandbox-exec -f %q sh %q", session, p.Dir, filepath.Join(d, "sandbox.sb"), script), nil
+		}
 		return fmt.Sprintf("tmux new-session -d -s %q -c %q sh %q", session, p.Dir, script), nil
 	}
 	if e := os.WriteFile(script, []byte(text), 0700); e != nil {
 		return "", e
 	}
-	if e := exec.Command("tmux", "new-session", "-d", "-s", session, "-c", p.Dir, "sh", script).Run(); e != nil {
+	argv, e := sandboxCommand(cfg, cfg.EffectiveRoot(p), d, script)
+	if e != nil {
+		return "", e
+	}
+	if e := exec.Command("tmux", append([]string{"new-session", "-d", "-s", session, "-c", p.Dir}, argv...)...).Run(); e != nil {
 		return "", e
 	}
 	_ = exec.Command("tmux", "pipe-pane", "-o", "-t", session, fmt.Sprintf("cat >> %q", log)).Run()

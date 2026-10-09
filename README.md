@@ -15,7 +15,7 @@ Idempotent: run it again any time; it only changes what differs and never overwr
 | --- | --- | --- |
 | 0 | With `--restore <tgz>`: puts personal state back from a `backup` archive; never overwrites a file that exists (`--force-restore` to override) | `~/.pi`, `~/.bedrouter` |
 | 1 | Checks node, pi, aws, git; with `--install-pi`, installs `@earendil-works/pi-coding-agent` globally when `pi` is missing (skipped when present); notes whether `openwiki` is installed (optional, Node 22+) | global npm/bun/pnpm prefix |
-| 2 | `pi install` for every package in `hablo.json`, **and every `npm:`/`git:` package already listed in your `settings.json`**, that is not present on disk — so packages you added yourself come back after a reinstall too | `~/.pi/agent/settings.json` → `packages`, code under `~/.pi/agent/npm/` |
+| 2 | `pi install` for every package in `hablo.json`, **and every `npm:`/`git:` package already listed in your `settings.json`**, that is not present on disk — so packages you added yourself come back after a reinstall too. An installed package that is not at its `hablo.json` pin is moved to it; `--update-packages` updates the unpinned ones | `~/.pi/agent/settings.json` → `packages`, code under `~/.pi/agent/npm/` |
 | 3 | Adds the `bedrouter/*` models to `enabledModels` **if an allowlist already exists** (creating one would hide every other provider), a few UX settings only where unset; `--default-model` also makes `bedrouter/auto` the default | `~/.pi/agent/settings.json` |
 | 4 | Writes pi-bedrouter settings (server home and stop-on-exit policy), a `.env` with `AWS_PROFILE`, and renders the ordered model stack in `bedrouter.json` from `hablo.json` | `~/.pi/agent/pi-bedrouter.json`, `~/.bedrouter/` |
 | 5 | If the AWS profile is missing, runs `aws configure sso --profile <p>` (interactive); if credentials are expired, runs `aws sso login` | `~/.aws/config`, SSO token cache |
@@ -50,15 +50,87 @@ Then: `pi --provider bedrouter --model auto`. For firstmate: `cd <your project> 
 | `--base-branch <name>` | Integration branch for the Jira-branch policy (default `develop` from the manifest) |
 | `--skip-cli` `--bin-dir <dir>` `--cli-model <m>` | Skip the `hablo` command, install it somewhere other than `~/.local/bin`, or change its default model (default: `auto`) |
 | `--skip-tools` `--update-tools` | Skip firstmate's tool dependencies, or reinstall them even when present |
+| `--update-packages` | Run `pi update` on the installed Pi packages that `hablo.json` does not pin |
+| `--no-firstmate-pull` | Leave the firstmate checkout at its current commit (`hablo update` passes this) |
 | `--skip-jira` `--no-tracker` | Skip Jira reporting and dispatch entirely |
 | `--skip-jira-agent` | Install Jira reporting but not the dispatch agent |
 | `--jira-agent-interval <seconds>` `--jira-agent-label <name>` | Override the dispatch poll interval or ready label |
 | `--no-jira-agent-service` `--jira-agent-bin-dir <dir>` | Build without activating the scheduler, or change the binary directory |
 | `--jira-env <path>` | Link `~/.hablo/jira/.env` to an existing `KEY=VALUE` secrets file instead of writing a stub (default `jira.envSource` in the manifest; only applies when `.env` is absent) |
+| `--skip-publish` | Do not publish team stats, whatever `bedrouter.publish` in the manifest says |
+| `--publish-repo <owner/name>` | Publish to this stats repository, overriding the manifest. Naming one is itself the opt-in |
+| `--publish-cred gh\|env\|auto` | Where the publish token comes from. Answers the interactive question in advance, so an unattended run never blocks (default `auto`: `gh` when authenticated, else `BEDROUTER_PUBLISH_TOKEN`) |
 | `--skip-dream` | Skip the Dream binary, configuration, and timer |
 | `--dream-at HH:MM` `--no-dream-service` | Set the daily local run time (default `03:00`), or install Dream without activating its timer |
 | `--force-agents` | Overwrite existing agent profiles / workflows with the bundled ones |
 | `--dry-run` | Print, don't write |
+
+## Team stats: shared values are committed, personal ones are not
+
+Off by default. `bedrouter.publish.repo` in `hablo.json` is `null`, and nothing
+leaves any machine until a team sets it.
+
+The split is what makes a team rollout need no user input. Everything the whole
+team shares is a committed value in the manifest, and the one per-developer value
+is never in it:
+
+| Value | Where it lives | Set by |
+| --- | --- | --- |
+| Stats repository, branch, interval | `bedrouter.publish` in `hablo.json` | The team, once, committed |
+| Baseline rung for the savings figure | `bedrouter.routing.baselineAlias` | The team, once, committed |
+| The GitHub token | `gh` on the machine, or `BEDROUTER_PUBLISH_TOKEN` in `~/.bedrouter/.env` | Each developer, never committed |
+
+So a team sets the repository once:
+
+```json
+"publish": { "enabled": true, "repo": "acme/bedrouter-stats", "branch": "main", "intervalMs": 3600000, "credential": "auto" }
+```
+
+and every `./install.sh` after that renders it into `~/.bedrouter/bedrouter.json`
+and needs nothing from the person running it.
+
+The token resolves on the machine. `credential: "auto"` takes `gh auth token`
+when `gh` is authenticated for github.com, and otherwise reads
+`BEDROUTER_PUBLISH_TOKEN` from `~/.bedrouter/.env`. Because `gh` is already a
+firstmate requirement, most machines need no token created by hand.
+
+When `gh` is authenticated and `--publish-cred` was not given, an interactive
+install asks once whether to use it and records the answer. A non-interactive run
+is never asked: it takes `auto`, prints the source it found, and continues. A
+machine with no credential at all publishes nothing and says so.
+
+Step 4 prints what will leave the machine, where it goes, and how to stop it,
+every run. Before opting in, see exactly what your own machine would send:
+
+```sh
+bedrouter publish --dry-run
+```
+
+A day file carries counts and token sums only: no prompts, no conversation or
+session keys, no error text, and nothing per request. It does show that a named
+person worked on a given date and roughly how much, which in a public stats
+repository is world-readable. The stats repository's own README states that on
+its face.
+
+## Updates and releases
+
+A HABLO release is a git tag `vX.Y.Z` on this repository. The tag fixes the installer code, and `hablo.json` in
+that tag pins the exact version of every Pi package, bedrouter included. Every machine on a tag runs the same set.
+
+```sh
+hablo update --check    # show the current and the newest release, and each package pin that changes
+hablo update            # move to the newest release and install it
+```
+
+`hablo update` refuses to start while a Pi process or a `hablo-*` tmux session runs, because it replaces files that
+those processes loaded. It also refuses a checkout with uncommitted changes, or with commits that no remote branch
+contains. It stops the Jira agent, checks out the newest tag, and runs that release's installer with the arguments
+of your last install. It does not pull firstmate, update the Pi CLI, or update the firstmate tools. A full
+`./install.sh` run, `pi update --self`, and `--update-tools` still do those. If the new release fails to install,
+`hablo update` checks out the previous commit and installs it again.
+
+To publish a release, commit the pin changes in `hablo.json`, push the commit, and run `task release -- X.Y.Z`. The
+task runs the tests, then tags and pushes `vX.Y.Z`. [TODO/HABLO-UPDATE.md](TODO/HABLO-UPDATE.md) has the design.
 
 ## Backup, uninstall, reinstall
 
@@ -82,6 +154,8 @@ The additional scopes are `--with-state`, `--with-globals`, `--with-firstmate`, 
 For an older installation without a receipt, `--infer` produces a reduced plan using only files carrying the exact `HABLO-installer` marker and marked policy blocks. Execution requires both `--yes --infer`; inferred mode never removes global tools, the firstmate clone, or Pi because their earlier ownership cannot be proven. `--receipt <path>` selects a non-default receipt.
 
 ## Before you run it: an AWS profile that can call Bedrock
+
+[PREREQUISITES.md](PREREQUISITES.md) is the full checklist of tools, accounts, and credentials. `node install.mjs check` shows which ones this machine is missing.
 
 The installer needs the name of an AWS CLI profile (`--profile <name>`); bedrouter uses it through the standard SDK credential chain, and the profile has to belong to a principal allowed to call Bedrock (`bedrock:InvokeModel`, `bedrock:InvokeModelWithResponseStream`; the read-only `bedrock:ListFoundationModels` / `GetFoundationModel` / `ListInferenceProfiles` / `GetInferenceProfile` / `GetFoundationModelAvailability` let the probe explain denials). Create it once per machine, before the installer, so step 5 finds it. Install the AWS CLI first if needed (`brew install awscli`).
 

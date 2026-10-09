@@ -202,7 +202,7 @@ func (a app) dispatch(ctx context.Context, s *state.State, x japi.Issue) error {
 	if len(a.cfg.Agent.ReporterAllowlist) > 0 && !contains(a.cfg.Agent.ReporterAllowlist, x.Fields.Reporter.AccountID) {
 		return a.failIssue(ctx, s, x.Key, "reporter is not allowlisted")
 	}
-	if e := dispatch.Preflight(p, a.dry); e != nil {
+	if e := dispatch.Preflight(a.cfg, p, a.dry); e != nil {
 		return e
 	}
 	b := dispatch.FromIssue(x, p, description)
@@ -247,7 +247,7 @@ func (a app) dispatch(ctx context.Context, s *state.State, x japi.Issue) error {
 			return postClaimFail(e)
 		}
 	}
-	session, e := dispatch.Launch(a.cfg.Home, p, x.Key, brief, a.dry)
+	session, e := dispatch.Launch(a.cfg, p, x.Key, brief, a.dry)
 	if e != nil {
 		return postClaimFail(e)
 	}
@@ -357,7 +357,7 @@ func (a app) doctor(ctx context.Context) error {
 		}
 	}
 	for k, p := range a.cfg.Projects {
-		if e := dispatch.Preflight(p, true); e != nil {
+		if e := dispatch.Preflight(a.cfg, p, true); e != nil {
 			fmt.Fprintf(a.out, "  %s WARNING: %v\n", k, e)
 		} else {
 			fmt.Fprintf(a.out, "  %s ok\n", k)

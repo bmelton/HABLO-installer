@@ -14,6 +14,10 @@
 - [ ] **Wave 1** [MORE-PROVIDERS-AND-MODELS.md](MORE-PROVIDERS-AND-MODELS.md) (29 of 29 implementation items complete; 0.6.0 commits and tarballs ready; live-week validation and publication pending)
 
 - [ ] **Wave 2** [HOOKS.md](HOOKS.md) (19 items, installer step 12)
+- [ ] **Wave 2** Team stats: the installer half of bedrouter's own plan, at
+      `~/projects/ai/bedrouter/TODO/PLAN.md`. Step 4 renders `bedrouter.publish`
+      from `hablo.json`; the repo is a shared committed value and the token is
+      per developer. Code-complete on branch `feat/team-stats-publish`.
 - [ ] **Wave 2** [DEPENDENCY-TRUST.md](DEPENDENCY-TRUST.md) (14 items)
 - [ ] **Wave 3** [JIRA.md](JIRA.md) (19 of 19 implementation items complete; live Jira demo pending)
 - [ ] **Wave 3** [JIRA-AGENT.md](JIRA-AGENT.md) (21 of 21 implementation items complete; live Jira demo pending)

@@ -5,19 +5,18 @@
     "profile": "bedrouter"
   },
   "pi": {
-    "minVersions": {
-      "$comment": "Installed Pi packages whose version HABLO depends on. Reported in preflight, never enforced: an older package still works, on bedrouter only.",
-      "pi-bedrouter": "0.6.0"
-    },
+    "$commentCli": "minCliVersion: the oldest Pi CLI the prerequisite check accepts. pi-bedrouter declares it as its peer dependency.",
+    "minCliVersion": "0.85.0",
+    "$commentPins": "packages: each manifest package is pinned to the exact version this release was tested with. Step 2 moves an installed package to its pin, and a release changes a pin by changing it here. See TODO/HABLO-UPDATE.md.",
     "packages": [
-      "npm:pi-agents",
-      "npm:pi-usage-meters",
-      "npm:pi-openai-codex-usage",
-      "npm:pi-web-access",
-      "npm:pi-vision-handoff",
-      "npm:pi-impeccable",
-      "npm:pi-openwiki-adapter",
-      "npm:pi-bedrouter"
+      "npm:pi-agents@0.21.0",
+      "npm:pi-usage-meters@0.5.0",
+      "npm:pi-openai-codex-usage@0.1.2",
+      "npm:pi-web-access@0.29.0",
+      "npm:pi-vision-handoff@0.10.4",
+      "npm:pi-impeccable@0.1.0",
+      "npm:pi-openwiki-adapter@0.7.3",
+      "npm:pi-bedrouter@0.7.0"
     ],
     "optionalPackages": [],
     "enabledModels": [
@@ -60,30 +59,42 @@
       "enabled": true,
       "honorClientModel": false,
       "cacheHitRate": 0.8,
+      "$comment": "baselineAlias: the rung the dashboard prices the \"no router\" counterfactual at. Pinned, because null takes the dearest enabled rung that serves explore, and the entitlement probe changes which rung that is: when opus loses entitlement the baseline silently drops to glm-5 and every savings figure re-bases without saying so, which makes two screenshots incomparable. A pinned rung does not need to be enabled: the probe disables a rung once its fallbacks run out, but leaves its prices intact, and pricing a counterfactual reads only the prices. Requires bedrouter with the disabled-baseline fix; an older build rejects a disabled alias.",
+      "baselineAlias": "opus",
       "classifier": {
         "enabled": true,
         "model": "nova-micro",
         "mode": "fallback"
       }
     },
+    "publish": {
+      "$comment": "Team stats. A shared value: set `repo` and `enabled` once for the team, commit it, and every install picks it up with no user input. The token is the per-developer half and is never here: `credential` auto takes `gh auth token` when gh is authenticated, else BEDROUTER_PUBLISH_TOKEN from ~/.bedrouter/.env. The stats repo is public, so read its README before enabling: a day file shows that a named person worked on a date and roughly how much. Check what your machine would send with `bedrouter publish --dry-run`.",
+      "enabled": false,
+      "repo": null,
+      "branch": "main",
+      "intervalMs": 3600000,
+      "credential": "auto"
+    },
     "stack": [
-      { "alias": "nova-micro", "bedrockId": "us.amazon.nova-micro-v1:0", "vendor": "amazon", "enabled": true, "inputPerM": 0.035, "outputPerM": 0.14, "serves": ["trivial"], "capabilities": { "transport": "bedrock-runtime", "api": "converse", "toolUse": true, "streaming": true, "imageInput": false, "structuredOutputs": false, "promptCaching": true, "contextWindow": 128000, "maxOutput": 5000 } },
-      { "alias": "nova-lite", "bedrockId": "us.amazon.nova-lite-v1:0", "vendor": "amazon", "enabled": true, "inputPerM": 0.06, "outputPerM": 0.24, "serves": ["trivial"], "capabilities": { "transport": "bedrock-runtime", "api": "converse", "toolUse": true, "streaming": true, "imageInput": true, "structuredOutputs": false, "promptCaching": true, "contextWindow": 300000, "maxOutput": 5000 } },
-      { "alias": "gpt-oss-20b", "bedrockId": "openai.gpt-oss-20b-1:0", "vendor": "openai", "enabled": true, "inputPerM": 0.07, "outputPerM": 0.30, "serves": ["trivial"], "capabilities": { "transport": "bedrock-runtime", "api": "converse", "toolUse": true, "streaming": true, "imageInput": false, "structuredOutputs": true, "promptCaching": false, "contextWindow": 128000, "maxOutput": 16000 } },
-      { "alias": "glm-4.7-flash", "bedrockId": "zai.glm-4.7-flash", "vendor": "zai", "enabled": true, "inputPerM": 0.07, "outputPerM": 0.40, "serves": ["trivial"], "capabilities": { "transport": "bedrock-runtime", "api": "converse", "toolUse": false, "streaming": true, "imageInput": false, "structuredOutputs": true, "promptCaching": false, "contextWindow": 203000, "maxOutput": 4000 } },
+      { "alias": "nova-micro", "modelId": "us.amazon.nova-micro-v1:0", "vendor": "amazon", "enabled": true, "inputPerM": 0.035, "outputPerM": 0.14, "serves": ["trivial"], "capabilities": { "transport": "bedrock-runtime", "api": "converse", "toolUse": true, "streaming": true, "imageInput": false, "structuredOutputs": false, "promptCaching": true, "contextWindow": 128000, "maxOutput": 5000 } },
+      { "alias": "nova-lite", "modelId": "us.amazon.nova-lite-v1:0", "vendor": "amazon", "enabled": true, "inputPerM": 0.06, "outputPerM": 0.24, "serves": ["trivial"], "capabilities": { "transport": "bedrock-runtime", "api": "converse", "toolUse": true, "streaming": true, "imageInput": true, "structuredOutputs": false, "promptCaching": true, "contextWindow": 300000, "maxOutput": 5000 } },
+      { "alias": "gpt-oss-20b", "modelId": "openai.gpt-oss-20b-1:0", "vendor": "openai", "enabled": true, "inputPerM": 0.07, "outputPerM": 0.30, "serves": ["trivial"], "capabilities": { "transport": "bedrock-runtime", "api": "converse", "toolUse": true, "streaming": true, "imageInput": false, "structuredOutputs": true, "promptCaching": false, "contextWindow": 128000, "maxOutput": 16000 } },
+      { "alias": "glm-4.7-flash", "modelId": "zai.glm-4.7-flash", "vendor": "zai", "enabled": true, "inputPerM": 0.07, "outputPerM": 0.40, "serves": ["trivial"], "capabilities": { "transport": "bedrock-runtime", "api": "converse", "toolUse": false, "streaming": true, "imageInput": false, "structuredOutputs": true, "promptCaching": false, "contextWindow": 203000, "maxOutput": 4000 } },
       { "$comment": "serves trivial, not execute: in a long agent loop (~37k tokens, firstmate's full tool surface) this rung reasons about the tool it wants and then ends the turn without emitting the call, so a captain routed here does nothing and costs a dispatch cycle. It emits tool calls correctly in short prompts, which is why toolUse stays true and only the class changed. Verified twice on HAB-1, 2026-09-14.",
-        "alias": "gpt-oss-120b", "bedrockId": "openai.gpt-oss-120b-1:0", "vendor": "openai", "enabled": true, "inputPerM": 0.15, "outputPerM": 0.60, "serves": ["trivial"], "capabilities": { "transport": "bedrock-runtime", "api": "converse", "toolUse": true, "streaming": true, "imageInput": false, "structuredOutputs": true, "promptCaching": false, "contextWindow": 128000, "maxOutput": 16000 } },
-      { "alias": "minimax-m2.5", "bedrockId": "minimax.minimax-m2.5", "vendor": "minimax", "enabled": true, "inputPerM": 0.30, "outputPerM": 1.20, "serves": ["execute"], "capabilities": { "transport": "bedrock-runtime", "api": "converse", "toolUse": false, "streaming": true, "imageInput": false, "structuredOutputs": true, "promptCaching": false, "contextWindow": 196000, "maxOutput": 8000 } },
-      { "alias": "qwen3-coder-next", "bedrockId": "qwen.qwen3-coder-next", "vendor": "qwen", "enabled": true, "inputPerM": 0.50, "outputPerM": 1.20, "serves": ["execute"], "capabilities": { "transport": "bedrock-runtime", "api": "converse", "toolUse": false, "streaming": true, "imageInput": false, "structuredOutputs": true, "promptCaching": false, "contextWindow": 256000, "maxOutput": 16000 } },
-      { "alias": "qwen3-235b", "bedrockId": "qwen.qwen3-235b-a22b-2507-v1:0", "vendor": "qwen", "enabled": true, "inputPerM": 0.22, "outputPerM": 0.88, "serves": ["execute"], "capabilities": { "transport": "bedrock-runtime", "api": "converse", "toolUse": true, "streaming": true, "imageInput": false, "structuredOutputs": true, "promptCaching": false, "contextWindow": 256000, "maxOutput": 8000 } },
-      { "alias": "kimi-k2.5", "bedrockId": "moonshotai.kimi-k2.5", "vendor": "moonshotai", "enabled": true, "inputPerM": 0.60, "outputPerM": 3.00, "serves": ["execute"], "capabilities": { "transport": "bedrock-runtime", "api": "converse", "toolUse": false, "streaming": true, "imageInput": true, "structuredOutputs": true, "promptCaching": false, "contextWindow": 256000, "maxOutput": 16000 } },
-      { "alias": "glm-4.7", "bedrockId": "zai.glm-4.7", "vendor": "zai", "enabled": true, "inputPerM": 0.60, "outputPerM": 2.20, "serves": ["execute"], "capabilities": { "transport": "bedrock-runtime", "api": "converse", "toolUse": false, "streaming": true, "imageInput": false, "structuredOutputs": true, "promptCaching": false, "contextWindow": 203000, "maxOutput": 4000 } },
-      { "alias": "nova-pro", "bedrockId": "us.amazon.nova-pro-v1:0", "vendor": "amazon", "enabled": true, "inputPerM": 0.80, "outputPerM": 3.20, "serves": ["execute"], "capabilities": { "transport": "bedrock-runtime", "api": "converse", "toolUse": true, "streaming": true, "imageInput": true, "structuredOutputs": false, "promptCaching": true, "contextWindow": 300000, "maxOutput": 5000 } },
-      { "alias": "glm-5", "bedrockId": "zai.glm-5", "vendor": "zai", "enabled": true, "inputPerM": 1.00, "outputPerM": 3.20, "serves": ["execute", "explore"], "capabilities": { "transport": "bedrock-runtime", "api": "converse", "toolUse": false, "streaming": true, "imageInput": false, "structuredOutputs": true, "promptCaching": false, "contextWindow": 200000, "maxOutput": 128000 } },
-      { "alias": "haiku", "bedrockId": "us.anthropic.claude-haiku-4-5-20251001-v1:0", "vendor": "anthropic", "enabled": true, "inputPerM": 1.10, "outputPerM": 5.50, "serves": ["trivial", "execute"], "capabilities": { "transport": "bedrock-runtime", "api": "converse", "toolUse": true, "streaming": true, "imageInput": true, "structuredOutputs": false, "promptCaching": true, "contextWindow": 200000, "maxOutput": 64000 } },
-      { "alias": "sonnet", "bedrockId": "us.anthropic.claude-sonnet-5", "vendor": "anthropic", "enabled": true, "inputPerM": 2.20, "outputPerM": 11.00, "serves": ["execute", "explore"], "capabilities": { "transport": "bedrock-runtime", "api": "converse", "toolUse": true, "streaming": true, "imageInput": true, "structuredOutputs": false, "promptCaching": true, "contextWindow": 1000000, "maxOutput": 128000 } },
-      { "alias": "opus", "bedrockId": "us.anthropic.claude-opus-5", "vendor": "anthropic", "enabled": true, "inputPerM": 5.50, "outputPerM": 27.50, "serves": ["explore"], "capabilities": { "transport": "bedrock-runtime", "api": "converse", "toolUse": true, "streaming": true, "imageInput": true, "structuredOutputs": false, "promptCaching": true, "contextWindow": 1000000, "maxOutput": 128000 } },
-      { "alias": "fable", "bedrockId": "us.anthropic.claude-fable-5-1", "vendor": "anthropic", "enabled": false, "inputPerM": 11.00, "outputPerM": 55.00, "serves": ["explore"], "capabilities": { "transport": "bedrock-runtime", "api": "converse", "toolUse": true, "streaming": true, "imageInput": true, "structuredOutputs": false, "promptCaching": true, "contextWindow": 1000000, "maxOutput": 128000 } }
+        "alias": "gpt-oss-120b", "modelId": "openai.gpt-oss-120b-1:0", "vendor": "openai", "enabled": true, "inputPerM": 0.15, "outputPerM": 0.60, "serves": ["trivial"], "capabilities": { "transport": "bedrock-runtime", "api": "converse", "toolUse": true, "streaming": true, "imageInput": false, "structuredOutputs": true, "promptCaching": false, "contextWindow": 128000, "maxOutput": 16000 } },
+      { "alias": "minimax-m2.5", "modelId": "minimax.minimax-m2.5", "vendor": "minimax", "enabled": true, "inputPerM": 0.30, "outputPerM": 1.20, "serves": ["execute"], "capabilities": { "transport": "bedrock-runtime", "api": "converse", "toolUse": false, "streaming": true, "imageInput": false, "structuredOutputs": true, "promptCaching": false, "contextWindow": 196000, "maxOutput": 8000 } },
+      { "alias": "qwen3-coder-next", "modelId": "qwen.qwen3-coder-next", "vendor": "qwen", "enabled": true, "inputPerM": 0.50, "outputPerM": 1.20, "serves": ["execute"], "capabilities": { "transport": "bedrock-runtime", "api": "converse", "toolUse": false, "streaming": true, "imageInput": false, "structuredOutputs": true, "promptCaching": false, "contextWindow": 256000, "maxOutput": 16000 } },
+      { "alias": "qwen3-235b", "modelId": "qwen.qwen3-235b-a22b-2507-v1:0", "vendor": "qwen", "enabled": true, "inputPerM": 0.22, "outputPerM": 0.88, "serves": ["execute"], "capabilities": { "transport": "bedrock-runtime", "api": "converse", "toolUse": true, "streaming": true, "imageInput": false, "structuredOutputs": true, "promptCaching": false, "contextWindow": 256000, "maxOutput": 8000 } },
+      { "alias": "kimi-k2.5", "modelId": "moonshotai.kimi-k2.5", "vendor": "moonshotai", "enabled": true, "inputPerM": 0.60, "outputPerM": 3.00, "serves": ["execute"], "capabilities": { "transport": "bedrock-runtime", "api": "converse", "toolUse": false, "streaming": true, "imageInput": true, "structuredOutputs": true, "promptCaching": false, "contextWindow": 256000, "maxOutput": 16000 } },
+      { "alias": "glm-4.7", "modelId": "zai.glm-4.7", "vendor": "zai", "enabled": true, "inputPerM": 0.60, "outputPerM": 2.20, "serves": ["execute"], "capabilities": { "transport": "bedrock-runtime", "api": "converse", "toolUse": false, "streaming": true, "imageInput": false, "structuredOutputs": true, "promptCaching": false, "contextWindow": 203000, "maxOutput": 4000 } },
+      { "alias": "nova-pro", "modelId": "us.amazon.nova-pro-v1:0", "vendor": "amazon", "enabled": true, "inputPerM": 0.80, "outputPerM": 3.20, "serves": ["execute"], "capabilities": { "transport": "bedrock-runtime", "api": "converse", "toolUse": true, "streaming": true, "imageInput": true, "structuredOutputs": false, "promptCaching": true, "contextWindow": 300000, "maxOutput": 5000 } },
+      { "alias": "glm-5", "modelId": "zai.glm-5", "vendor": "zai", "enabled": true, "inputPerM": 1.00, "outputPerM": 3.20, "serves": ["execute", "explore"], "capabilities": { "transport": "bedrock-runtime", "api": "converse", "toolUse": false, "streaming": true, "imageInput": false, "structuredOutputs": true, "promptCaching": false, "contextWindow": 200000, "maxOutput": 128000 } },
+      { "alias": "haiku", "modelId": "us.anthropic.claude-haiku-4-5-20251001-v1:0", "vendor": "anthropic", "enabled": true, "inputPerM": 1.10, "outputPerM": 5.50, "serves": ["trivial", "execute"], "capabilities": { "transport": "bedrock-runtime", "api": "converse", "toolUse": true, "streaming": true, "imageInput": true, "structuredOutputs": false, "promptCaching": true, "contextWindow": 200000, "maxOutput": 64000 } },
+      { "alias": "sonnet", "modelId": "us.anthropic.claude-sonnet-5", "vendor": "anthropic", "enabled": true, "inputPerM": 2.20, "outputPerM": 11.00, "serves": ["execute", "explore"], "capabilities": { "transport": "bedrock-runtime", "api": "converse", "toolUse": true, "streaming": true, "imageInput": true, "structuredOutputs": false, "promptCaching": true, "contextWindow": 1000000, "maxOutput": 128000 } },
+      { "alias": "opus", "modelId": "us.anthropic.claude-opus-5", "vendor": "anthropic", "enabled": true, "inputPerM": 5.50, "outputPerM": 27.50, "serves": ["explore"], "capabilities": { "transport": "bedrock-runtime", "api": "converse", "toolUse": true, "streaming": true, "imageInput": true, "structuredOutputs": false, "promptCaching": true, "contextWindow": 1000000, "maxOutput": 128000 } },
+      { "$comment": "A prepaid ChatGPT seat, consumed before any Bedrock rung bills a dollar. inputPerM 0 sorts it first and it still has to pass every capability filter. Disabled on purpose: an entitlement is per seat, so each machine uses its own `codex login` and enabling this is a deliberate act. The probe skips it, because it has no Bedrock entitlement to test. To enable it for yourself, set enabled true here: the installer re-renders bedrouter.json on every run, so an edit made there alone does not survive.",
+        "alias": "codex", "modelId": "gpt-5.6-sol", "vendor": "openai", "enabled": false, "inputPerM": 0, "outputPerM": 0, "serves": ["execute", "explore"], "auth": { "kind": "oauth-file", "path": "~/.codex/auth.json" }, "capabilities": { "transport": "openai-responses", "api": "responses", "toolUse": true, "streaming": true, "imageInput": true, "structuredOutputs": false, "promptCaching": false, "contextWindow": 272000, "maxOutput": 272000 } },
+      { "alias": "fable", "modelId": "us.anthropic.claude-fable-5-1", "vendor": "anthropic", "enabled": false, "inputPerM": 11.00, "outputPerM": 55.00, "serves": ["explore"], "capabilities": { "transport": "bedrock-runtime", "api": "converse", "toolUse": true, "streaming": true, "imageInput": true, "structuredOutputs": false, "promptCaching": true, "contextWindow": 1000000, "maxOutput": 128000 } }
     ],
     "fallbacks": {
       "$comment": "When the probe says a rung is not entitled on this account, try these Bedrock IDs in order before dropping the rung.",
@@ -151,6 +162,7 @@
     "projects": {
       "HAB": { "dir": "~/projects/ai/HABLO-installer", "baseBranch": "main", "mode": "direct-PR", "statuses": { "inProgress": "In Progress", "inReview": "In Review" } }
     },
+    "$comment6": "root: set it (for example \"~/projects\") to confine every dispatched captain's writes to that directory with sandbox-exec, because a Jira description is untrusted input. A project's own root overrides it. Unset means unconfined. A root at or above ~ is refused, and requireSandbox (default true) refuses dispatch where sandbox-exec is missing.",
     "reporting": { "enabled": true, "transitions": true, "stages": ["triage", "spec", "tests", "implementation", "review", "done"] },
     "agent": {
       "enabled": true,

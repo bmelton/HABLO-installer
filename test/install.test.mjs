@@ -29,10 +29,10 @@ function fixture() {
   const settings = { packages: manifest.pi.packages, enabledModels: ["openai/test"] };
   fs.writeFileSync(path.join(agentDir, "settings.json"), JSON.stringify(settings, null, 2) + "\n");
   for (const spec of manifest.pi.packages) {
-    const name = spec.replace(/^npm:/, "");
+    const [, name, version] = spec.match(/^npm:(.+)@([^@]+)$/);
     const pkgDir = path.join(agentDir, "npm", "node_modules", name);
     fs.mkdirSync(pkgDir, { recursive: true });
-    fs.writeFileSync(path.join(pkgDir, "package.json"), JSON.stringify({ name, version: "1.0.0" }));
+    fs.writeFileSync(path.join(pkgDir, "package.json"), JSON.stringify({ name, version }));
   }
   const bedrouter = path.join(agentDir, "npm", "node_modules", "bedrouter");
   fs.mkdirSync(path.join(bedrouter, "dist"), { recursive: true });
@@ -77,7 +77,7 @@ function runInstalledHablo(f, args = [], env = {}) {
   if (!fs.existsSync(path.join(project, ".git"))) execFileSync("git", ["init", "--quiet", project]);
   const calls = path.join(f.dir, "pi-call.json");
   fs.rmSync(calls, { force: true });
-  writeExecutable(path.join(f.fakeBin, "pi"), `#!/bin/sh\nprintf '%s\\n' "$HABLO_CREW_MODEL" > ${JSON.stringify(calls)}\nprintf '%s\\n' "$@" >> ${JSON.stringify(calls)}\n`);
+  writeExecutable(path.join(f.fakeBin, "pi"), `#!/bin/sh\nprintf '%s\\n' "$HABLO_CREW_MODEL" > ${JSON.stringify(calls)}\nprintf '%s\\n' "$@" >> ${JSON.stringify(calls)}\nprintf 'HABLO_PI_EXTENSIONS=%s\\n' "$HABLO_PI_EXTENSIONS" >> ${JSON.stringify(calls)}\n`);
   try {
     const stderr = execFileSync(path.join(f.home, ".local", "bin", "hablo"), args, {
       cwd: project,
@@ -212,6 +212,37 @@ test("hablo resolves one captain/crew model and refuses an ambiguous bare model"
     const full = runInstalledHablo(f, ["--model", "openai-codex/gpt-5.3-codex"]);
     assert.equal(full.status, 0);
     assert.match(full.call, /^openai-codex\/gpt-5\.3-codex/m);
+  } finally {
+    fs.rmSync(f.dir, { recursive: true, force: true });
+  }
+});
+
+// A captain that cannot see which extensions loaded checks with `ps aux`, gets a guaranteed false negative because
+// Pi runs extensions in-process, and then invents a launcher to restart Pi with. HABLO_PI_EXTENSIONS is what
+// hablo-captain.ts reads to say so in the preamble, so it must list exactly the files that got an -e flag.
+test("hablo reports the supervision extensions it loaded, and stays quiet about ones it did not", () => {
+  const f = fixture();
+  try {
+    install(f);
+    const ext = path.join(f.firstmate, ".pi", "extensions");
+    fs.mkdirSync(ext, { recursive: true });
+    // hablo resolves FM_ROOT with `pwd -P`, and on macOS the temp dir is a symlink into /private.
+    const real = path.join(fs.realpathSync(f.firstmate), ".pi", "extensions");
+    fs.writeFileSync(path.join(ext, "fm-primary-pi-watch.ts"), "");
+    fs.writeFileSync(path.join(ext, "fm-calm.ts"), "");
+
+    const run = runInstalledHablo(f);
+    assert.equal(run.status, 0);
+    const reported = run.call.match(/^HABLO_PI_EXTENSIONS=(.*)$/m)[1].split(" ").filter(Boolean);
+    assert.deepEqual(reported, [path.join(real, "fm-primary-pi-watch.ts"), path.join(real, "fm-calm.ts")]);
+    for (const p of reported) assert.match(run.call, new RegExp(`^-e\\n${p.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`, "m"));
+    assert.ok(!run.call.includes("fm-primary-turnend-guard.ts"), run.call);
+
+    // Nothing on disk: the export must be empty, not the string "missing", and hablo must still launch.
+    fs.rmSync(ext, { recursive: true, force: true });
+    const bare = runInstalledHablo(f);
+    assert.equal(bare.status, 0);
+    assert.match(bare.call, /^HABLO_PI_EXTENSIONS=$/m);
   } finally {
     fs.rmSync(f.dir, { recursive: true, force: true });
   }
@@ -428,4 +459,120 @@ test("Wave 5 accepts a pushed detached firstmate clone and rejects a branch with
   } finally {
     fs.rmSync(f.dir, { recursive: true, force: true });
   }
+});
+
+test("team stats stay off until the manifest or a flag names a repository", () => {
+  const f = fixture();
+  try {
+    const brHome = path.join(f.home, ".bedrouter");
+    const out = install(f, ["--home", brHome, "--skip-jira", "--skip-dream", "--skip-cli", "--skip-firstmate"]);
+    const cfg = JSON.parse(fs.readFileSync(path.join(brHome, "bedrouter.json"), "utf8"));
+    assert.equal(Object.hasOwn(cfg, "publish"), false, "no publish block means nothing can leave the machine");
+    assert.match(out, /publish: off/);
+    // The dashboard baseline is a shared value and travels with the stack.
+    assert.equal(Object.hasOwn(cfg.routing, "baselineAlias"), true);
+  } finally {
+    fs.rmSync(f.dir, { recursive: true, force: true });
+  }
+});
+
+test("a named stats repository renders the publish block and says what leaves the machine", () => {
+  const f = fixture();
+  try {
+    const brHome = path.join(f.home, ".bedrouter");
+    const out = install(f, ["--home", brHome, "--publish-repo", "acme/bedrouter-stats", "--publish-cred", "env",
+      "--skip-jira", "--skip-dream", "--skip-cli", "--skip-firstmate"]);
+    const cfg = JSON.parse(fs.readFileSync(path.join(brHome, "bedrouter.json"), "utf8"));
+    assert.deepEqual(cfg.publish, { enabled: true, repo: "acme/bedrouter-stats", branch: "main", intervalMs: 3600000, credential: "env" });
+    // The token is the personal half and must never be rendered into the shared config.
+    assert.equal(JSON.stringify(cfg).includes("BEDROUTER_PUBLISH_TOKEN"), false);
+    assert.match(out, /data\/<your-github-login>\/<date>\.json/);
+    assert.match(out, /turn it off with --skip-publish/);
+
+    // --skip-publish wins over the repository, and the block is removed again on the next run.
+    install(f, ["--home", brHome, "--publish-repo", "acme/bedrouter-stats", "--skip-publish",
+      "--skip-jira", "--skip-dream", "--skip-cli", "--skip-firstmate"]);
+    assert.equal(Object.hasOwn(JSON.parse(fs.readFileSync(path.join(brHome, "bedrouter.json"), "utf8")), "publish"), false);
+  } finally {
+    fs.rmSync(f.dir, { recursive: true, force: true });
+  }
+});
+
+test("an unattended run is never asked about the credential", () => {
+  const f = fixture();
+  try {
+    const brHome = path.join(f.home, ".bedrouter");
+    // stdin is not a TTY here, which is exactly the unattended case: it must take the default and continue.
+    const out = install(f, ["--home", brHome, "--publish-repo", "acme/bedrouter-stats",
+      "--skip-jira", "--skip-dream", "--skip-cli", "--skip-firstmate"]);
+    assert.equal(JSON.parse(fs.readFileSync(path.join(brHome, "bedrouter.json"), "utf8")).publish.credential, "auto");
+    assert.equal(/Use it to publish team stats/.test(out), false);
+  } finally {
+    fs.rmSync(f.dir, { recursive: true, force: true });
+  }
+});
+
+test("an installed package off its pin is moved to it, one at its pin is left alone", () => {
+  const f = fixture();
+  const calls = path.join(f.dir, "pi-calls");
+  writeExecutable(path.join(f.fakeBin, "pi"), `#!/bin/sh\n[ "\${1:-}" = --version ] && echo 'pi test'\nprintf '%s\\n' "$*" >> ${JSON.stringify(calls)}\nexit 0\n`);
+  const pkgJson = path.join(f.agentDir, "npm", "node_modules", "pi-bedrouter", "package.json");
+
+  install(f);
+  assert.ok(!(fs.existsSync(calls) && /^(install|update) /m.test(fs.readFileSync(calls, "utf8"))), "a package at its pin must not be touched");
+
+  const pin = manifest.pi.packages.find((p) => p.startsWith("npm:pi-bedrouter@"));
+  fs.writeFileSync(pkgJson, JSON.stringify({ name: "pi-bedrouter", version: "0.6.0" }));
+  // The fake pi installs nothing, so the version check after the install must stop the run.
+  assert.throws(() => install(f, ["--skip-cli"]), (e) => /pi-bedrouter is 0\.6\.0 after pi install; this release pins/.test(e.stderr));
+  assert.match(fs.readFileSync(calls, "utf8"), new RegExp(`^install ${pin.replace(/[.]/g, "\\.")}$`, "m"));
+});
+
+test("a required prerequisite stops the install before anything is written", () => {
+  const f = fixture();
+  writeExecutable(path.join(f.fakeBin, "aws"), "#!/bin/sh\necho 'aws-cli/1.29.0 Python/3.11'\n");
+  const env = { ...process.env, HOME: f.home, PI_CODING_AGENT_DIR: f.agentDir, PATH: `${f.fakeBin}:${process.env.PATH}`, NO_COLOR: "1" };
+  const check = (...a) => { try { return { status: 0, out: execFileSync(process.execPath, [path.join(root, "install.mjs"), ...a], { encoding: "utf8", env }) }; } catch (e) { return { status: e.status, out: `${e.stdout}${e.stderr}` }; } };
+
+  const r = check("--profile", "bedrouter", "--skip-tools", "--firstmate-dir", f.firstmate);
+  assert.equal(r.status, 1);
+  assert.match(r.out, /\[ \] AWS CLI v2 \(found v1\)\s+required/);
+  assert.match(r.out, /1 required prerequisite\(s\) missing/);
+  assert.equal(fs.existsSync(path.join(f.home, ".hablo")), false, "nothing may be written when a required prerequisite is missing");
+
+  // Without the AWS step, v1 is only advisory.
+  assert.equal(check("check", "--profile", "").status, 0);
+});
+
+test("update plans the move to the newest release tag and refuses a dirty checkout", () => {
+  const f = fixture();
+  const g = (cwd, ...a) => execFileSync("git", ["-c", "user.email=t@example.invalid", "-c", "user.name=t", ...a], { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
+  const src = path.join(f.dir, "src");
+  fs.cpSync(root, src, { recursive: true, filter: (p) => !/\/(\.git|node_modules)(\/|$)/.test(p.slice(root.length)) });
+  g(f.dir, "init", "--quiet", src);
+  g(src, "add", "-A"); g(src, "commit", "--quiet", "-m", "one"); g(src, "tag", "v0.1.0");
+  const manifestPath = path.join(src, "hablo.json");
+  fs.writeFileSync(manifestPath, fs.readFileSync(manifestPath, "utf8").replace(/"npm:pi-bedrouter@[^"]+"/, '"npm:pi-bedrouter@9.9.9"'));
+  g(src, "commit", "--quiet", "-am", "two"); g(src, "tag", "v0.2.0");
+  g(f.dir, "clone", "--quiet", "--bare", src, path.join(f.dir, "origin.git"));
+  const work = path.join(f.dir, "work");
+  g(f.dir, "clone", "--quiet", path.join(f.dir, "origin.git"), work);
+  g(work, "checkout", "--quiet", "v0.1.0");
+
+  const update = (...a) => {
+    try { return { status: 0, out: execFileSync(process.execPath, [path.join(work, "install.mjs"), "update", ...a], { encoding: "utf8", env: { ...process.env, HOME: f.home, PI_CODING_AGENT_DIR: f.agentDir }, stdio: ["ignore", "pipe", "pipe"] }) }; }
+    catch (e) { return { status: e.status, out: `${e.stdout}${e.stderr}` }; }
+  };
+  const plan = update("--check");
+  assert.equal(plan.status, 0, plan.out);
+  assert.match(plan.out, /v0\.1\.0 -> v0\.2\.0/);
+  assert.match(plan.out, /pi-bedrouter {2}\S+ -> 9\.9\.9/);
+  assert.equal(g(work, "describe", "--tags").trim(), "v0.1.0", "--check must not move the checkout");
+
+  fs.writeFileSync(path.join(work, "stray.txt"), "x");
+  assert.match(update("--check").out, /has uncommitted changes/);
+  fs.rmSync(path.join(work, "stray.txt"));
+
+  g(work, "checkout", "--quiet", "v0.2.0");
+  assert.match(update("--check").out, /up to date: v0\.2\.0/);
 });
