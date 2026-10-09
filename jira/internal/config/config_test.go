@@ -23,6 +23,23 @@ func TestLoadExpandsAndLoadsCredentials(t *testing.T) {
 		t.Fatalf("bad load: %#v %#v", got, cred)
 	}
 }
+
+func TestLoadEnvAcceptsExportPrefix(t *testing.T) {
+	h := t.TempDir()
+	env := filepath.Join(h, ".env")
+	// Same shape as a secrets file sourced from bashrc.
+	os.WriteFile(env, []byte("export JIRA_URL=https://x.atlassian.net\nexport JIRA_EMAIL=e\nexport JIRA_API_TOKEN=t\n"), 0600)
+	got, err := loadEnv(env)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got["JIRA_URL"] != "https://x.atlassian.net" || got["JIRA_EMAIL"] != "e" || got["JIRA_API_TOKEN"] != "t" {
+		t.Fatalf("export-prefixed env not loaded: %#v", got)
+	}
+	if _, bad := got["export JIRA_URL"]; bad {
+		t.Fatal("kept export as part of the key")
+	}
+}
 func TestRejectsLocalOnly(t *testing.T) {
 	h := t.TempDir()
 	c := Config{Home: h, EnvFile: filepath.Join(h, ".env"), Projects: map[string]Project{"DEMO": {Dir: h, BaseBranch: "main", Mode: "local-only"}}}

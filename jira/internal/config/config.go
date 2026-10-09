@@ -225,6 +225,10 @@ func loadEnv(path string) (map[string]string, error) {
 		if line == "" || strings.HasPrefix(line, "#") {
 			continue
 		}
+		// Accept shell-sourceable "export KEY=VALUE" as well as bare KEY=VALUE.
+		if rest, ok := strings.CutPrefix(line, "export"); ok && len(rest) > 0 && (rest[0] == ' ' || rest[0] == '\t') {
+			line = strings.TrimSpace(rest)
+		}
 		k, v, ok := strings.Cut(line, "=")
 		if ok {
 			out[strings.TrimSpace(k)] = strings.Trim(strings.TrimSpace(v), "\"'")

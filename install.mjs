@@ -115,6 +115,8 @@ function writeText(p, text, options = {}) {
 function writeJson(p, obj, options) { writeText(p, JSON.stringify(obj, null, 2) + "\n", options); }
 const which = (cmd) => { const r = spawnSync(process.platform === "win32" ? "where" : "which", [cmd], { encoding: "utf8" }); return r.status === 0 ? r.stdout.trim().split("\n")[0] : undefined; };
 const run = (cmd, a, o = {}) => spawnSync(cmd, a, { encoding: "utf8", stdio: o.inherit ? "inherit" : "pipe", cwd: o.cwd, env: { ...process.env, ...o.env }, timeout: o.timeout ?? 300_000 });
+// KEY=VALUE or export KEY=VALUE (shell-sourceable secrets files).
+const envHasAssign = (text, k) => new RegExp(`^\\s*(?:export\\s+)?${k}\\s*=\\s*\\S`, "m").test(text);
 const semverGte = (v, min) => Number(String(v).replace(/^v/, "").split(".")[0]) >= min;
 const versionGte = (v, min) => {
   const parts = (x) => String(x).replace(/^v/, "").split(/[.-]/).slice(0, 3).map((n) => Number(n) || 0);
@@ -300,7 +302,8 @@ function prerequisites() {
   if (jiraOn) {
     const src = expand(opt("jira-env", jira.envSource ?? ""));
     const env = [src, expand(jira.envFile ?? "")].filter(Boolean).map((p) => { try { return fs.readFileSync(p, "utf8"); } catch { return ""; } }).join("\n");
-    const missing = (jira.envVars ?? []).filter((k) => !new RegExp(`^\\s*${k}\\s*=\\s*\\S`, "m").test(env));
+    // Optional "export " so a file sourced from bashrc (KEY=VALUE or export KEY=VALUE) counts.
+    const missing = (jira.envVars ?? []).filter((k) => !envHasAssign(env, k));
     add("recommended", `Jira credentials${missing.length ? ` (missing ${missing.join(", ")})` : ""}`, !missing.length, { text: `put ${(jira.envVars ?? []).map((k) => `${k}=`).join(" ")} in ${homePath(src || expand(jira.envFile))}`, cmds: [] });
     const rooted = jira.root || Object.values(jira.projects ?? {}).some((p) => p.root);
     if (rooted) add("recommended", "sandbox-exec (enforces jira.root)", Boolean(which("sandbox-exec")), { text: "macOS only; set jira.requireSandbox=false to dispatch unconfined", cmds: [] });
@@ -1033,7 +1036,7 @@ else {
     }
   } else note(agentSkipped ? "dispatch agent skipped; reporting CLI installed" : "service skipped (--no-jira-agent-service)");
   const envText = fs.existsSync(jira.envFile) ? fs.readFileSync(jira.envFile, "utf8") : "";
-  if (jira.envVars.every((k) => new RegExp(`^${k}=.+$`, "m").test(envText))) { if (DRY) note(`${jira.envFile} has all of ${jira.envVars.join(", ")}; would run hablo-jira doctor`); else { const r=run(path.join(jiraBinDir,"hablo-jira"),["doctor"]); note((r.stdout||r.stderr).trim()); } }
+  if (jira.envVars.every((k) => envHasAssign(envText, k))) { if (DRY) note(`${jira.envFile} has all of ${jira.envVars.join(", ")}; would run hablo-jira doctor`); else { const r=run(path.join(jiraBinDir,"hablo-jira"),["doctor"]); note((r.stdout||r.stderr).trim()); } }
   else note("jira: not configured. Add JIRA_URL, JIRA_EMAIL, and JIRA_API_TOKEN to ~/.hablo/jira/.env; create a token at https://id.atlassian.com/manage-profile/security/api-tokens");
 }
 

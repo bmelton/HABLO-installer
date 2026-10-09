@@ -577,6 +577,31 @@ test("update plans the move to the newest release tag and refuses a dirty checko
   assert.match(update("--check").out, /up to date: v0\.2\.0/);
 });
 
+test("Jira credential check accepts export-prefixed secrets files", () => {
+  const f = fixture();
+  try {
+    const env = {
+      ...process.env,
+      HOME: f.home,
+      PI_CODING_AGENT_DIR: f.agentDir,
+      PATH: `${f.fakeBin}:${process.env.PATH}`,
+      NO_COLOR: "1",
+    };
+    const check = () => {
+      try { return execFileSync(process.execPath, [path.join(root, "install.mjs"), "check", "--profile", "", "--skip-tools"], { encoding: "utf8", env }); }
+      catch (e) { return `${e.stdout}${e.stderr}`; }
+    };
+    assert.match(check(), /\[ \] Jira credentials \(missing JIRA_URL, JIRA_EMAIL, JIRA_API_TOKEN\)/);
+
+    const secrets = path.join(f.home, ".config", "secrets", "JIRA");
+    fs.mkdirSync(path.dirname(secrets), { recursive: true });
+    fs.writeFileSync(secrets, "export JIRA_URL=https://x.atlassian.net\nexport JIRA_EMAIL=e@example.com\nexport JIRA_API_TOKEN=token\n", { mode: 0o600 });
+    assert.match(check(), /\[x\] Jira credentials(?:\s|$)/);
+  } finally {
+    fs.rmSync(f.dir, { recursive: true, force: true });
+  }
+});
+
 test("on apt, the fix block batches safe packages and sends AWS CLI and Go elsewhere", () => {
   const f = fixture();
   // Only node and which besides the fakes, so git, curl, tmux and jq are all missing whatever the host has.
