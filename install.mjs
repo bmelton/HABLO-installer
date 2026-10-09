@@ -207,9 +207,55 @@ if (args[0] === "update") {
 // ---- prerequisites ----------------------------------------------------------------------------------------------------
 // One checklist before anything is written, so a missing tool is fixed up front instead of discovered at step 11.
 // required stops the install, recommended disables a feature (and lands in the closing warnings), optional is advisory.
+
+// HABLO_PLATFORM=<os>/<package manager> (for example linux/apt) overrides the detection, for tests and for a machine
+// with more than one package manager.
+const platform = (() => {
+  const [os, pm] = (process.env.HABLO_PLATFORM ?? "").split("/");
+  if (os) return { os, pm: pm || null };
+  if (process.platform === "darwin") return { os: "darwin", pm: which("brew") ? "brew" : null };
+  return { os: process.platform, pm: (["apt-get", "dnf", "pacman"].find((m) => which(m)) ?? "").replace("-get", "") || null };
+})();
+const installLine = { brew: "brew install", apt: "sudo apt install -y", dnf: "sudo dnf install -y", pacman: "sudo pacman -S --needed" };
+// Where each tool should come from. A string is a package that the manager ships in a usable version, so the fix
+// block batches it into one install line. An object is a different source, because the manager's own package is too
+// old or the wrong major version, and a user told only "install X" reaches for that package first.
+const SOURCES = {
+  git: { brew: "git", apt: "git", dnf: "git", pacman: "git", darwin: { cmds: ["xcode-select --install"] } },
+  curl: { brew: "curl", apt: "curl", dnf: "curl", pacman: "curl" },
+  tmux: { brew: "tmux", apt: "tmux", dnf: "tmux", pacman: "tmux" },
+  jq: { brew: "jq", apt: "jq", dnf: "jq", pacman: "jq" },
+  unzip: { brew: "unzip", apt: "unzip", dnf: "unzip", pacman: "unzip" },
+  node: { brew: "node", pacman: "nodejs npm", any: { why: "distro Node is usually older than 20", needs: ["curl"], cmds: ["curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.3/install.sh | bash", "nvm install 22   # in a new shell"] } },
+  aws: {
+    brew: "awscli",
+    darwin: { needs: ["curl"], cmds: ["curl -fsSL https://awscli.amazonaws.com/AWSCLIV2.pkg -o /tmp/AWSCLIV2.pkg", "sudo installer -pkg /tmp/AWSCLIV2.pkg -target /"] },
+    any: { why: "apt and dnf ship AWS CLI v1 on many releases", needs: ["curl", "unzip"], cmds: ['curl -fsSL "https://awscli.amazonaws.com/awscli-exe-linux-$(uname -m).zip" -o /tmp/awscliv2.zip', "unzip -q -o /tmp/awscliv2.zip -d /tmp && sudo /tmp/aws/install --update"] },
+  },
+  gh: { brew: "gh", dnf: "gh", pacman: "github-cli", any: { why: "it lags behind; GitHub publishes its own apt repository", cmds: ["follow https://github.com/cli/cli/blob/trunk/docs/install_linux.md"] } },
+  go: { brew: "go", dnf: "golang", pacman: "go", any: { why: "golang-go is older than 1.22 on Debian 12 and Ubuntu 22.04", cmds: ["follow https://go.dev/doc/install (the tarball goes to /usr/local/go)"] } },
+};
+function remedy(tool) {
+  const s = SOURCES[tool][platform.pm] ?? SOURCES[tool][platform.os] ?? SOURCES[tool].any;
+  if (typeof s === "string") return { pkg: s, text: `${installLine[platform.pm]} ${s}` };
+  if (s) return { cmds: s.cmds, needs: s.needs ?? [], text: `${s.why && platform.pm ? `not the ${platform.pm} package (${s.why}): ` : ""}${s.cmds.join(", then ")}` };
+  return { cmds: [], text: platform.os === "darwin" ? `install Homebrew (https://brew.sh), then: brew install ${tool}` : `install ${tool} with your package manager` };
+}
+// A too-old tool is usually a right install shadowed on PATH by an older one, so say which binary was found and where
+// it came from. "too old" alone sends the user to install the same thing again.
+function sourceOf(bin) {
+  const p = bin === "node" ? process.execPath : which(bin);
+  if (!p) return "";
+  let real = p;
+  try { real = fs.realpathSync(p); } catch {}
+  const from = /\/\.nvm\//.test(real) ? "nvm" : /homebrew|Cellar|linuxbrew/i.test(real) ? "Homebrew" : /^\/snap\//.test(real) ? "snap"
+    : /^\/(usr\/)?bin\//.test(real) ? (platform.pm && platform.pm !== "brew" ? `the ${platform.pm} package` : "the system") : null;
+  return ` at ${homePath(p)}${from ? `, from ${from}` : ""}`;
+}
+
 function prerequisites() {
   const items = [];
-  const add = (level, label, ok, fix) => items.push({ level, label, ok, fix });
+  const add = (level, label, ok, fix) => items.push({ level, label, ok, fix: typeof fix === "string" ? { text: fix, cmds: [fix] } : fix });
   const firstLine = (cmd, a) => { const r = run(cmd, a, { timeout: 20_000 }); return r.status === 0 ? `${r.stdout}${r.stderr}`.trim().split("\n")[0] : ""; };
   const jira = manifest.jira ?? {};
   const jiraOn = !flag("skip-jira") && !flag("no-tracker") && jira.enabled !== false;
@@ -218,59 +264,75 @@ function prerequisites() {
   const awsOn = !flag("skip-aws") && Boolean(profile);
 
   const node = process.versions.node;
-  add("required", `Node.js 20+ (found ${node})`, versionGte(node, "20.0.0"), "install Node.js 20 or later (nvm install 22)");
+  const nodeOk = versionGte(node, "20.0.0");
+  add("required", `Node.js 20+ (found ${node}${nodeOk ? "" : sourceOf("node")})`, nodeOk, remedy("node"));
   const minPi = manifest.pi.minCliVersion;
   const piVer = which("pi") ? firstLine("pi", ["--version"]).match(/\d+\.\d+\.\d+/)?.[0] : undefined;
-  if (!which("pi")) add(flag("install-pi") ? "optional" : "required", `Pi CLI ${minPi}+${flag("install-pi") ? " (step 1 installs it)" : ""}`, flag("install-pi"), `re-run with --install-pi, or: npm install -g ${manifest.pi.cliPackage}`);
-  else if (!piVer) add("recommended", `Pi CLI ${minPi}+ (version unreadable)`, false, "check `pi --version`");
-  else add("required", `Pi CLI ${minPi}+ (found ${piVer})`, versionGte(piVer, minPi), "pi update --self");
+  if (!which("pi")) add(flag("install-pi") ? "optional" : "required", `Pi CLI ${minPi}+${flag("install-pi") ? " (step 1 installs it)" : ""}`, flag("install-pi"), { text: `re-run with --install-pi, or: npm install -g ${manifest.pi.cliPackage}`, cmds: [`npm install -g ${manifest.pi.cliPackage}`] });
+  else if (!piVer) add("recommended", `Pi CLI ${minPi}+ (version unreadable${sourceOf("pi")})`, false, { text: "run `pi --version` and check that it prints a version", cmds: [] });
+  else add("required", `Pi CLI ${minPi}+ (found ${piVer}${versionGte(piVer, minPi) ? "" : sourceOf("pi")})`, versionGte(piVer, minPi), "pi update --self");
   // v1 has no `configure sso`, no sso-session profiles and no `bedrock get-use-case-for-model-access`, so step 5 fails
   // on it with errors that say nothing about the CLI version.
   const awsMajor = which("aws") ? Number(firstLine("aws", ["--version"]).match(/aws-cli\/(\d+)/)?.[1] ?? 0) : 0;
-  add(awsOn ? "required" : "optional", `AWS CLI v2${awsMajor ? ` (found v${awsMajor})` : which("aws") ? " (version unreadable)" : ""}`, awsMajor >= 2, "install AWS CLI v2: brew install awscli, or https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html");
+  add(awsOn ? "required" : "optional", `AWS CLI v2${awsMajor ? ` (found v${awsMajor}${awsMajor >= 2 ? "" : sourceOf("aws")})` : which("aws") ? ` (version unreadable${sourceOf("aws")})` : ""}`, awsMajor >= 2, remedy("aws"));
   if (awsOn && awsMajor >= 2) {
     const known = firstLine("aws", ["configure", "get", "region", "--profile", profile]) || run("aws", ["configure", "list-profiles"], { timeout: 20_000 }).stdout?.split("\n").includes(profile);
     add("optional", `AWS profile "${profile}"${known ? "" : " (step 5 creates it interactively)"}`, Boolean(known), `aws configure sso --profile ${profile}`);
   }
-  add("recommended", "git", Boolean(which("git")), "brew install git");
+  add("recommended", "git", Boolean(which("git")), remedy("git"));
   if (fmOn || jiraOn) {
-    add("recommended", "gh (GitHub CLI)", Boolean(which("gh")), "brew install gh");
+    add("recommended", "gh (GitHub CLI)", Boolean(which("gh")), remedy("gh"));
     if (which("gh")) add("recommended", "gh signed in", run("gh", ["auth", "status"], { timeout: 20_000 }).status === 0, "gh auth login");
-    add("recommended", "tmux (firstmate crew, Jira captains)", Boolean(which("tmux")), "brew install tmux");
+    add("recommended", "tmux (firstmate crew, Jira captains)", Boolean(which("tmux")), remedy("tmux"));
   }
-  if (fmOn) add("recommended", "jq (firstmate validates crew-dispatch.json)", Boolean(which("jq")), "brew install jq");
+  if (fmOn) add("recommended", "jq (firstmate validates crew-dispatch.json)", Boolean(which("jq")), remedy("jq"));
   if (jiraOn || dreamOn) {
     const goVer = which("go") ? firstLine("go", ["version"]).match(/go(\d+\.\d+(?:\.\d+)?)/)?.[1] : undefined;
-    add("recommended", `Go 1.22+ (Jira and Dream are built from source)${goVer ? ` (found ${goVer})` : ""}`, Boolean(goVer && versionGte(goVer, "1.22.0")), "brew install go, or https://go.dev/dl/");
+    const goOk = Boolean(goVer && versionGte(goVer, "1.22.0"));
+    add("recommended", `Go 1.22+ (Jira and Dream are built from source)${goVer ? ` (found ${goVer}${goOk ? "" : sourceOf("go")})` : ""}`, goOk, remedy("go"));
   }
-  if (!flag("skip-tools")) add("recommended", "curl (installs treehouse and no-mistakes)", Boolean(which("curl")), "brew install curl");
+  if (!flag("skip-tools")) add("recommended", "curl (installs treehouse and no-mistakes)", Boolean(which("curl")), remedy("curl"));
   if (!flag("skip-cli")) {
     const binDir = expand(opt("bin-dir", manifest.cli.binDir));
-    add("recommended", `${homePath(binDir)} on PATH`, (process.env.PATH ?? "").split(path.delimiter).includes(binDir), `add to your shell rc: export PATH="${homePath(binDir).replace(/^~/, "$HOME")}:$PATH"`);
+    const rc = /zsh$/.test(process.env.SHELL ?? "") ? "~/.zshrc" : "~/.bashrc";
+    add("recommended", `${homePath(binDir)} on PATH`, (process.env.PATH ?? "").split(path.delimiter).includes(binDir), `echo 'export PATH="${homePath(binDir).replace(/^~/, "$HOME")}:$PATH"' >> ${rc}   # then open a new shell`);
   }
   if (jiraOn) {
     const src = expand(opt("jira-env", jira.envSource ?? ""));
     const env = [src, expand(jira.envFile ?? "")].filter(Boolean).map((p) => { try { return fs.readFileSync(p, "utf8"); } catch { return ""; } }).join("\n");
     const missing = (jira.envVars ?? []).filter((k) => !new RegExp(`^\\s*${k}\\s*=\\s*\\S`, "m").test(env));
-    add("recommended", `Jira credentials${missing.length ? ` (missing ${missing.join(", ")})` : ""}`, !missing.length, `put ${(jira.envVars ?? []).map((k) => `${k}=`).join(" ")} in ${homePath(src || expand(jira.envFile))}`);
+    add("recommended", `Jira credentials${missing.length ? ` (missing ${missing.join(", ")})` : ""}`, !missing.length, { text: `put ${(jira.envVars ?? []).map((k) => `${k}=`).join(" ")} in ${homePath(src || expand(jira.envFile))}`, cmds: [] });
     const rooted = jira.root || Object.values(jira.projects ?? {}).some((p) => p.root);
-    if (rooted) add("recommended", "sandbox-exec (enforces jira.root)", Boolean(which("sandbox-exec")), "macOS only; set jira.requireSandbox=false to dispatch unconfined");
+    if (rooted) add("recommended", "sandbox-exec (enforces jira.root)", Boolean(which("sandbox-exec")), { text: "macOS only; set jira.requireSandbox=false to dispatch unconfined", cmds: [] });
   }
-  add("optional", `Node.js ${manifest.openwiki.minNode}+ and openwiki (OpenWiki)`, versionGte(node, `${manifest.openwiki.minNode}.0.0`) && Boolean(which("openwiki")), `npm install -g ${manifest.openwiki.npmPackage}   (Node ${manifest.openwiki.minNode}+)`);
+  add("optional", `Node.js ${manifest.openwiki.minNode}+ and openwiki (OpenWiki)`, versionGte(node, `${manifest.openwiki.minNode}.0.0`) && Boolean(which("openwiki")), `npm install -g ${manifest.openwiki.npmPackage}`);
   return items;
 }
 function printPrerequisites(items) {
   const color = process.stdout.isTTY && !process.env.NO_COLOR;
   const paint = (code, s) => (color ? `\x1b[${code}m${s}\x1b[0m` : s);
   const mark = (i) => (i.ok ? paint(32, "[x]") : i.level === "required" ? paint(31, "[ ]") : i.level === "recommended" ? paint(33, "[ ]") : paint(2, "[ ]"));
-  log("\nPrerequisites  (PREREQUISITES.md has the full list)");
+  log(`\nPrerequisites  (${platform.pm ? `package manager: ${platform.pm}; ` : ""}PREREQUISITES.md has the full list)`);
   for (const i of items) {
     log(`  ${mark(i)} ${i.label}${i.ok ? "" : paint(2, `  ${i.level}`)}`);
-    if (!i.ok) log(`        ${paint(2, `fix: ${i.fix}`)}`);
+    if (!i.ok) log(`        ${paint(2, `fix: ${i.fix.text}`)}`);
   }
   const blocked = items.filter((i) => !i.ok && i.level === "required").length;
   const degraded = items.filter((i) => !i.ok && i.level === "recommended").length;
   log(`  ${blocked ? paint(31, `${blocked} required missing`) : paint(32, "all required present")}${degraded ? `, ${paint(33, `${degraded} recommended missing`)}` : ""}`);
+  // One block to paste, in order: the packages the manager ships correctly in a single line, then each other source.
+  const todo = items.filter((i) => !i.ok && i.level !== "optional");
+  // A fix's own commands may need curl or unzip, which a fresh machine can lack even when nothing else asks for them.
+  const needed = todo.flatMap((i) => i.fix.needs ?? []).filter((t) => !which(t)).map((t) => remedy(t).pkg).filter(Boolean);
+  const pkgs = [...new Set([...todo.flatMap((i) => (i.fix.pkg ? i.fix.pkg.split(" ") : [])), ...needed])];
+  const cmds = todo.flatMap((i) => (i.fix.pkg ? [] : i.fix.cmds ?? []));
+  const manual = todo.filter((i) => !i.fix.pkg && !i.fix.cmds?.length);
+  if (pkgs.length || cmds.length) {
+    log("\n  To fix, run these in order, then re-check with: node install.mjs check");
+    if (pkgs.length) log(`    ${installLine[platform.pm]} ${pkgs.join(" ")}`);
+    for (const c of cmds) log(`    ${c}`);
+  }
+  for (const i of manual) log(`  ${pkgs.length || cmds.length ? "and by hand" : "\n  By hand"}: ${i.fix.text}`);
   return { blocked, degraded };
 }
 
@@ -280,7 +342,7 @@ if (args[0] === "check") {
 {
   const items = prerequisites();
   const { blocked } = printPrerequisites(items);
-  for (const i of items.filter((x) => !x.ok && x.level === "recommended")) warnings.push(`${i.label}: ${i.fix}`);
+  for (const i of items.filter((x) => !x.ok && x.level === "recommended")) warnings.push(`${i.label}: ${i.fix.text}`);
   if (blocked && !DRY) fail(`${blocked} required prerequisite(s) missing (above). Fix them and re-run, or run \`node install.mjs check\` to re-check.`);
   if (blocked) note("(dry run continues; a real run stops here)");
 }

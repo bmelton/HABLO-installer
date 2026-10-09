@@ -8,6 +8,22 @@ first on every run. A missing *required* item (Node.js 20, the Pi CLI, or AWS CL
 the install before it writes anything. A missing *recommended* item turns off a feature and appears again in the
 warnings at the end.
 
+## Where each tool comes from
+
+The checklist detects the package manager (Homebrew, apt, dnf, or pacman) and prints each fix for this machine. It
+ends with one block of commands to paste. Some distro packages are the wrong source, so the checklist never offers
+them:
+
+| Tool | Do not use | Use instead |
+|---|---|---|
+| Node.js | apt, dnf (usually older than 20) | nvm, or `brew install node`, or pacman |
+| AWS CLI | apt, dnf (v1 on many releases) | the official installer from awscli.amazonaws.com, or `brew install awscli` |
+| Go | apt (older than 1.22 on Debian 12 and Ubuntu 22.04) | the go.dev tarball, or brew, dnf, pacman |
+| gh | apt (lags behind) | GitHub's own apt repository, or brew, dnf, pacman |
+
+When a tool is too old, the checklist names the binary it found and where it came from. A new install that does not
+come first on `PATH` shows up there.
+
 ## Platform
 
 - [ ] macOS or Linux. Steps 13 and 14 install a launchd agent on macOS or a systemd user timer on Linux.
