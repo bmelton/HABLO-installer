@@ -511,3 +511,33 @@ test("an unattended run is never asked about the credential", () => {
     fs.rmSync(f.dir, { recursive: true, force: true });
   }
 });
+
+test("an installed package below minVersions is updated, a current one is left alone", () => {
+  const f = fixture();
+  const calls = path.join(f.dir, "pi-calls");
+  writeExecutable(path.join(f.fakeBin, "pi"), `#!/bin/sh\n[ "\${1:-}" = --version ] && echo 'pi test'\nprintf '%s\\n' "$*" >> ${JSON.stringify(calls)}\nexit 0\n`);
+  const pkgJson = path.join(f.agentDir, "npm", "node_modules", "pi-bedrouter", "package.json");
+
+  install(f);
+  assert.ok(!(fs.existsSync(calls) && fs.readFileSync(calls, "utf8").includes("update")), "a current package must not be updated");
+
+  fs.writeFileSync(pkgJson, JSON.stringify({ name: "pi-bedrouter", version: "0.6.0" }));
+  assert.throws(() => install(f, ["--skip-cli"]), (e) => /still 0\.6\.0 after pi update/.test(e.stderr));
+  assert.match(fs.readFileSync(calls, "utf8"), /^update --extension npm:pi-bedrouter$/m);
+});
+
+test("a required prerequisite stops the install before anything is written", () => {
+  const f = fixture();
+  writeExecutable(path.join(f.fakeBin, "aws"), "#!/bin/sh\necho 'aws-cli/1.29.0 Python/3.11'\n");
+  const env = { ...process.env, HOME: f.home, PI_CODING_AGENT_DIR: f.agentDir, PATH: `${f.fakeBin}:${process.env.PATH}`, NO_COLOR: "1" };
+  const check = (...a) => { try { return { status: 0, out: execFileSync(process.execPath, [path.join(root, "install.mjs"), ...a], { encoding: "utf8", env }) }; } catch (e) { return { status: e.status, out: `${e.stdout}${e.stderr}` }; } };
+
+  const r = check("--profile", "bedrouter", "--skip-tools", "--firstmate-dir", f.firstmate);
+  assert.equal(r.status, 1);
+  assert.match(r.out, /\[ \] AWS CLI v2 \(found v1\)\s+required/);
+  assert.match(r.out, /1 required prerequisite\(s\) missing/);
+  assert.equal(fs.existsSync(path.join(f.home, ".hablo")), false, "nothing may be written when a required prerequisite is missing");
+
+  // Without the AWS step, v1 is only advisory.
+  assert.equal(check("check", "--profile", "").status, 0);
+});

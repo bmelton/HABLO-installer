@@ -5,9 +5,11 @@
     "profile": "bedrouter"
   },
   "pi": {
+    "$commentCli": "minCliVersion: the oldest Pi CLI the prerequisite check accepts. pi-bedrouter declares it as its peer dependency.",
+    "minCliVersion": "0.85.0",
     "minVersions": {
-      "$comment": "Installed Pi packages whose version HABLO depends on. Reported in preflight, never enforced: an older package still works, on bedrouter only.",
-      "pi-bedrouter": "0.6.0"
+      "$comment": "Installed Pi packages whose version HABLO depends on. Step 2 runs pi update on an installed package below its minimum. pi-bedrouter 0.7.0 is the first to bring bedrouter 0.9.0.",
+      "pi-bedrouter": "0.7.0"
     },
     "packages": [
       "npm:pi-agents",

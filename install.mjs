@@ -2,6 +2,7 @@
 // HABLO installer: configures Pi + bedrouter + OpenWiki on a machine, idempotently, from hablo.json.
 // Zero dependencies. Node 20+ to run; Node 22+ is required for OpenWiki itself (checked, not enforced).
 //
+//   node install.mjs check   print the prerequisite checklist; exit 1 if a required one is missing
 //   node install.mjs backup [--to <dir>] [--with-history]   archive auth + trust (+ config; + sessions/caches/logs with the flag)
 //   node install.mjs uninstall [--yes] [--with-state] [--with-globals] [--with-firstmate]
 //                              [--with-services] [--remove-pi] [--all] [--no-backup] [--infer] [--receipt <path>]
@@ -12,6 +13,7 @@
 //                    [--no-openwiki-policy] [--nautical|--no-tone-policy]
 //                    [--skip-cli] [--bin-dir <dir>] [--cli-model <m>]   the `hablo` command (default ~/.local/bin) and its Pi extension
 //                    [--skip-tools] [--update-tools]   firstmate's tool dependencies (treehouse, no-mistakes, *-axi)
+//                    [--update-packages]   pi update every installed Pi package, not only those below minVersions
 //                    [--skip-jira|--no-tracker] [--skip-jira-agent] [--jira-agent-interval <s>]
 //                    [--jira-agent-label <name>] [--no-jira-agent-service] [--jira-agent-bin-dir <dir>]
 //                    [--jira-env <path>]
@@ -21,8 +23,8 @@
 //
 // Steps (each prints what it did or would do):
 //   0 restore     with --restore <tgz>: put personal state back (never overwrites an existing file unless --force-restore)
-//   1 preflight   node, pi (installed globally with --install-pi when missing), aws, git; openwiki (advisory)
-//   2 packages    pi install npm:<pkg> for anything not yet in settings.json packages
+//   1 preflight   prerequisite checklist (stops on a missing required item); pi installed with --install-pi
+//   2 packages    pi install npm:<pkg> for anything not yet in settings.json packages; pi update below minVersions
 //   3 settings    enabledModels += bedrouter/*; a few UX settings; optional default model
 //   4 bedrouter   ~/.pi/agent/pi-bedrouter.json, ~/.bedrouter/.env and bedrouter.json (rendered from hablo.json),
 //                 including the team-stats publish block when the manifest names a repo
@@ -143,6 +145,87 @@ if (args[0] === "backup") {
   process.exit(0);
 }
 
+// ---- prerequisites ----------------------------------------------------------------------------------------------------
+// One checklist before anything is written, so a missing tool is fixed up front instead of discovered at step 11.
+// required stops the install, recommended disables a feature (and lands in the closing warnings), optional is advisory.
+function prerequisites() {
+  const items = [];
+  const add = (level, label, ok, fix) => items.push({ level, label, ok, fix });
+  const firstLine = (cmd, a) => { const r = run(cmd, a, { timeout: 20_000 }); return r.status === 0 ? `${r.stdout}${r.stderr}`.trim().split("\n")[0] : ""; };
+  const jira = manifest.jira ?? {};
+  const jiraOn = !flag("skip-jira") && !flag("no-tracker") && jira.enabled !== false;
+  const dreamOn = !flag("skip-dream") && manifest.dream?.enabled !== false;
+  const fmOn = !flag("skip-firstmate");
+  const awsOn = !flag("skip-aws") && Boolean(profile);
+
+  const node = process.versions.node;
+  add("required", `Node.js 20+ (found ${node})`, versionGte(node, "20.0.0"), "install Node.js 20 or later (nvm install 22)");
+  const minPi = manifest.pi.minCliVersion;
+  const piVer = which("pi") ? firstLine("pi", ["--version"]).match(/\d+\.\d+\.\d+/)?.[0] : undefined;
+  if (!which("pi")) add(flag("install-pi") ? "optional" : "required", `Pi CLI ${minPi}+${flag("install-pi") ? " (step 1 installs it)" : ""}`, flag("install-pi"), `re-run with --install-pi, or: npm install -g ${manifest.pi.cliPackage}`);
+  else if (!piVer) add("recommended", `Pi CLI ${minPi}+ (version unreadable)`, false, "check `pi --version`");
+  else add("required", `Pi CLI ${minPi}+ (found ${piVer})`, versionGte(piVer, minPi), "pi update --self");
+  // v1 has no `configure sso`, no sso-session profiles and no `bedrock get-use-case-for-model-access`, so step 5 fails
+  // on it with errors that say nothing about the CLI version.
+  const awsMajor = which("aws") ? Number(firstLine("aws", ["--version"]).match(/aws-cli\/(\d+)/)?.[1] ?? 0) : 0;
+  add(awsOn ? "required" : "optional", `AWS CLI v2${awsMajor ? ` (found v${awsMajor})` : which("aws") ? " (version unreadable)" : ""}`, awsMajor >= 2, "install AWS CLI v2: brew install awscli, or https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html");
+  if (awsOn && awsMajor >= 2) {
+    const known = firstLine("aws", ["configure", "get", "region", "--profile", profile]) || run("aws", ["configure", "list-profiles"], { timeout: 20_000 }).stdout?.split("\n").includes(profile);
+    add("optional", `AWS profile "${profile}"${known ? "" : " (step 5 creates it interactively)"}`, Boolean(known), `aws configure sso --profile ${profile}`);
+  }
+  add("recommended", "git", Boolean(which("git")), "brew install git");
+  if (fmOn || jiraOn) {
+    add("recommended", "gh (GitHub CLI)", Boolean(which("gh")), "brew install gh");
+    if (which("gh")) add("recommended", "gh signed in", run("gh", ["auth", "status"], { timeout: 20_000 }).status === 0, "gh auth login");
+    add("recommended", "tmux (firstmate crew, Jira captains)", Boolean(which("tmux")), "brew install tmux");
+  }
+  if (fmOn) add("recommended", "jq (firstmate validates crew-dispatch.json)", Boolean(which("jq")), "brew install jq");
+  if (jiraOn || dreamOn) {
+    const goVer = which("go") ? firstLine("go", ["version"]).match(/go(\d+\.\d+(?:\.\d+)?)/)?.[1] : undefined;
+    add("recommended", `Go 1.22+ (Jira and Dream are built from source)${goVer ? ` (found ${goVer})` : ""}`, Boolean(goVer && versionGte(goVer, "1.22.0")), "brew install go, or https://go.dev/dl/");
+  }
+  if (!flag("skip-tools")) add("recommended", "curl (installs treehouse and no-mistakes)", Boolean(which("curl")), "brew install curl");
+  if (!flag("skip-cli")) {
+    const binDir = expand(opt("bin-dir", manifest.cli.binDir));
+    add("recommended", `${homePath(binDir)} on PATH`, (process.env.PATH ?? "").split(path.delimiter).includes(binDir), `add to your shell rc: export PATH="${homePath(binDir).replace(/^~/, "$HOME")}:$PATH"`);
+  }
+  if (jiraOn) {
+    const src = expand(opt("jira-env", jira.envSource ?? ""));
+    const env = [src, expand(jira.envFile ?? "")].filter(Boolean).map((p) => { try { return fs.readFileSync(p, "utf8"); } catch { return ""; } }).join("\n");
+    const missing = (jira.envVars ?? []).filter((k) => !new RegExp(`^\\s*${k}\\s*=\\s*\\S`, "m").test(env));
+    add("recommended", `Jira credentials${missing.length ? ` (missing ${missing.join(", ")})` : ""}`, !missing.length, `put ${(jira.envVars ?? []).map((k) => `${k}=`).join(" ")} in ${homePath(src || expand(jira.envFile))}`);
+    const rooted = jira.root || Object.values(jira.projects ?? {}).some((p) => p.root);
+    if (rooted) add("recommended", "sandbox-exec (enforces jira.root)", Boolean(which("sandbox-exec")), "macOS only; set jira.requireSandbox=false to dispatch unconfined");
+  }
+  add("optional", `Node.js ${manifest.openwiki.minNode}+ and openwiki (OpenWiki)`, versionGte(node, `${manifest.openwiki.minNode}.0.0`) && Boolean(which("openwiki")), `npm install -g ${manifest.openwiki.npmPackage}   (Node ${manifest.openwiki.minNode}+)`);
+  return items;
+}
+function printPrerequisites(items) {
+  const color = process.stdout.isTTY && !process.env.NO_COLOR;
+  const paint = (code, s) => (color ? `\x1b[${code}m${s}\x1b[0m` : s);
+  const mark = (i) => (i.ok ? paint(32, "[x]") : i.level === "required" ? paint(31, "[ ]") : i.level === "recommended" ? paint(33, "[ ]") : paint(2, "[ ]"));
+  log("\nPrerequisites  (PREREQUISITES.md has the full list)");
+  for (const i of items) {
+    log(`  ${mark(i)} ${i.label}${i.ok ? "" : paint(2, `  ${i.level}`)}`);
+    if (!i.ok) log(`        ${paint(2, `fix: ${i.fix}`)}`);
+  }
+  const blocked = items.filter((i) => !i.ok && i.level === "required").length;
+  const degraded = items.filter((i) => !i.ok && i.level === "recommended").length;
+  log(`  ${blocked ? paint(31, `${blocked} required missing`) : paint(32, "all required present")}${degraded ? `, ${paint(33, `${degraded} recommended missing`)}` : ""}`);
+  return { blocked, degraded };
+}
+
+if (args[0] === "check") {
+  process.exit(printPrerequisites(prerequisites()).blocked ? 1 : 0);
+}
+{
+  const items = prerequisites();
+  const { blocked } = printPrerequisites(items);
+  for (const i of items.filter((x) => !x.ok && x.level === "recommended")) warnings.push(`${i.label}: ${i.fix}`);
+  if (blocked && !DRY) fail(`${blocked} required prerequisite(s) missing (above). Fix them and re-run, or run \`node install.mjs check\` to re-check.`);
+  if (blocked) note("(dry run continues; a real run stops here)");
+}
+
 // ---- 0 restore ---------------------------------------------------------------------------------------------------------
 const restoreFrom = opt("restore", "");
 if (restoreFrom) {
@@ -251,19 +334,14 @@ if (!piBin && flag("install-pi")) {
 if (!piBin && !DRY) fail(`pi is not installed. Re-run with --install-pi, or install it yourself:  npm install -g ${cliPkg}`);
 note(piBin ? `pi   ${run("pi", ["--version"]).stdout?.trim() || piBin}` : `pi   would be installed (${cliPkg})`);
 const awsBin = which("aws");
-note(awsBin ? `aws  ${run("aws", ["--version"]).stdout?.trim() || awsBin}` : "aws  MISSING - install the AWS CLI (brew install awscli) before the AWS step");
-note(which("git") ? "git  ok" : "git  MISSING (needed by OpenWiki freshness checks)");
 const goBin = which("go");
-note(goBin ? `go   ${run("go", ["version"]).stdout?.trim() || goBin}` : "go   MISSING (Jira and Dream binaries need Go 1.22+; both steps will be skipped)");
-const owBin = which("openwiki");
-note(owBin ? `openwiki ${owBin}` : `openwiki not installed (optional):  npm install -g ${manifest.openwiki.npmPackage}   (Node ${manifest.openwiki.minNode}+)`);
 for (const [pkg, min] of Object.entries(manifest.pi.minVersions ?? {})) {
   if (pkg.startsWith("$")) continue;
   const pkgPath = path.join(agentDir, "npm", "node_modules", pkg, "package.json");
   const installedVersion = readJson(pkgPath, null)?.version;
   if (!installedVersion) note(`${pkg} not installed yet (needs >= ${min}; step 2 will install it)`);
   else if (versionGte(installedVersion, min)) note(`${pkg} ${installedVersion} (>= ${min})`);
-  else note(`${pkg} ${installedVersion} (needs >= ${min} for non-bedrouter voyages; until you update, --provider on any other provider is overridden at session start)`);
+  else note(`${pkg} ${installedVersion} (needs >= ${min}; step 2 will update it)`);
 }
 
 // ---- 2 packages ------------------------------------------------------------------------------------------------
@@ -282,7 +360,22 @@ for (const pkg of wanted) {
   const listed = installed.has(pkg) || [...installed].some((p) => p.endsWith(`/${bare}`));
   // listed in settings.json but absent on disk (e.g. after a reinstall that restored settings): install anyway
   const onDisk = /^(npm|git):/.test(pkg) ? fs.existsSync(path.join(agentDir, "npm", "node_modules", bare, "package.json")) : true;
-  if (listed && onDisk) { note(`${pkg} already installed`); continue; }
+  if (listed && onDisk) {
+    // An installed package is otherwise never touched, so a machine set up before a minimum bump keeps the old code.
+    const min = manifest.pi.minVersions?.[bare];
+    const version = () => readJson(path.join(agentDir, "npm", "node_modules", bare, "package.json"), null)?.version;
+    const before = version();
+    const stale = Boolean(min && before && !versionGte(before, min));
+    if (!stale && !flag("update-packages")) { note(`${pkg} already installed`); continue; }
+    did(`pi update --extension ${pkg}${stale ? ` (${before} < ${min})` : ""}`);
+    if (!DRY) {
+      const r = run("pi", ["update", "--extension", pkg], { inherit: true });
+      if (r.status !== 0) fail(`pi update --extension ${pkg} failed (exit ${r.status})`);
+      // Fatal, because step 4 writes a config that only a new enough bedrouter can read.
+      if (min && !versionGte(version() ?? "0", min)) fail(`${pkg} is still ${version()} after pi update; HABLO needs >= ${min}`);
+    }
+    continue;
+  }
   if (listed && !onDisk) note(`${pkg} is listed but missing on disk; reinstalling`);
   did(`pi install ${pkg}`);
   if (!DRY) {
@@ -474,6 +567,11 @@ function probeStep() {
   if (!/^probe:/m.test(out.stdout ?? "")) { note((out.stdout || out.stderr || "").trim().split("\n").slice(0, 4).join("\n  ")); warn("entitlement probe did not run (no valid AWS credentials?); fix step 5 and re-run, or pass --skip-probe"); return; }
   const denied = () => [...(out.stdout ?? "").matchAll(/^\s+DENIED\s+(\S+)\s+(\S+)/gm)].map((m) => ({ alias: m[1], id: m[2] }));
   let d = denied();
+  // A rung whose id prints as undefined was never sent to Bedrock, so the refusal says nothing about entitlement.
+  // Without this a config error reads as "this account can invoke nothing" and the probe, believing it, disables the
+  // whole stack: a wrong diagnosis that sends you to AWS support instead of to bedrouter.json.
+  const unresolved = d.filter((x) => x.id === "undefined").map((x) => x.alias);
+  if (unresolved.length) fail(`the probe could not resolve a model id for ${unresolved.length === d.length ? "every rung" : unresolved.join(", ")}; check modelId on those rungs in ${cfgPath} and the bedrouter version in ${brPkg} (needs 0.9.0+). This is not an entitlement failure.`);
   let changed = false;
   const triedByAlias = new Map();
   for (let round = 0; d.length && round < 4; round++) {
@@ -563,10 +661,6 @@ const fm = manifest.firstmate;
 const fmDir = expand(opt("firstmate-dir", fm.dir));
 if (flag("skip-firstmate")) note("skipped (--skip-firstmate)");
 else {
-  const missing = fm.requires.filter((c) => !which(c));
-  if (missing.length) note(`missing: ${missing.join(", ")} (firstmate needs git + gh for its GitHub flows and tmux as the crew runtime; brew install ${missing.join(" ")})`);
-  const ghAuth = which("gh") ? run("gh", ["auth", "status"]) : null;
-  if (ghAuth && ghAuth.status !== 0) note("gh is not authenticated: run `gh auth login` before the first session");
   if (fs.existsSync(path.join(fmDir, ".git"))) {
     const before = run("git", ["-C", fmDir, "rev-parse", "HEAD"]).stdout?.trim();
     did(`git -C ${fmDir} pull --ff-only`);
@@ -599,7 +693,6 @@ else {
       if (curDispatch && !/HABLO-installer/.test(curDispatch)) note(`${path.relative(home, dispatchPath)} exists and was not written by this installer; leaving it (delete it to adopt the HABLO one)`);
       else { writeText(dispatchPath, dispatch); did(`write ${path.relative(home, dispatchPath)}: every crewmate inherits the captain's provider/model through its brief`); }
     } else note("crew dispatch already inherits the captain's provider/model");
-    if (!which("jq")) note("jq is required by firstmate to validate crew-dispatch.json (brew install jq)");
     // Backend
     const backend = opt("backend", fm.backend);
     if (backend) {
