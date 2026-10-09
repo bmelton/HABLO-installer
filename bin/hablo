@@ -3,6 +3,7 @@
 # managed by HABLO-installer (bin/hablo in that repo is the source; re-running the installer refreshes this copy).
 #
 #   cd ~/code/myproject && hablo [pi options...]
+#   hablo update [--check]   move to the newest HABLO release and re-install it (--check only shows the plan)
 #
 # firstmate normally wants to be launched from its own checkout, because the harness discovers AGENTS.md and
 # .pi/extensions from the working directory. This wrapper keeps firstmate's code and home where they are and points
@@ -20,6 +21,7 @@ set -eu
 
 FM_ROOT="${FM_ROOT:-__FM_ROOT__}"
 HABLO_HOME="${HABLO_HOME:-__HABLO_HOME__}"
+HABLO_INSTALLER="${HABLO_INSTALLER:-__HABLO_INSTALLER__}"
 MODE="${HABLO_PROJECT_MODE:-direct-PR}"
 DEFAULT_PROVIDER="__PROVIDER__"
 DEFAULT_MODEL="__MODEL__"
@@ -27,12 +29,16 @@ PROVIDER="${HABLO_PROVIDER:-$DEFAULT_PROVIDER}"
 MODEL="${HABLO_MODEL:-$DEFAULT_MODEL}"
 
 usage() {
-  sed -n '2,20p' "$0" | sed 's/^# \{0,1\}//'
+  sed -n '2,19p' "$0" | sed 's/^# \{0,1\}//'
   echo
   echo "env: FM_ROOT (firstmate checkout), FM_HOME (firstmate home, default FM_ROOT), HABLO_PROJECT_MODE (default direct-PR),"
   echo "     HABLO_PROVIDER / HABLO_MODEL (default $PROVIDER / $MODEL)"
 }
-case "${1:-}" in -h|--help|help) usage; exit 0;; esac
+case "${1:-}" in
+  -h|--help|help) usage; exit 0;;
+  # Reserved, so `hablo update` runs the updater instead of reaching Pi as a prompt.
+  update) shift; exec node "$HABLO_INSTALLER/install.mjs" update "$@";;
+esac
 
 [ -d "$FM_ROOT/bin" ] || { echo "hablo: firstmate checkout not found at $FM_ROOT (run the HABLO installer, or set FM_ROOT)" >&2; exit 1; }
 [ -f "$HABLO_HOME/hablo-captain.ts" ] || { echo "hablo: $HABLO_HOME/hablo-captain.ts missing (re-run the HABLO installer)" >&2; exit 1; }

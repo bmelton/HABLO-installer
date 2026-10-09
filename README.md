@@ -15,7 +15,7 @@ Idempotent: run it again any time; it only changes what differs and never overwr
 | --- | --- | --- |
 | 0 | With `--restore <tgz>`: puts personal state back from a `backup` archive; never overwrites a file that exists (`--force-restore` to override) | `~/.pi`, `~/.bedrouter` |
 | 1 | Checks node, pi, aws, git; with `--install-pi`, installs `@earendil-works/pi-coding-agent` globally when `pi` is missing (skipped when present); notes whether `openwiki` is installed (optional, Node 22+) | global npm/bun/pnpm prefix |
-| 2 | `pi install` for every package in `hablo.json`, **and every `npm:`/`git:` package already listed in your `settings.json`**, that is not present on disk — so packages you added yourself come back after a reinstall too. An installed package below its `minVersions` entry gets `pi update`; `--update-packages` updates every installed package | `~/.pi/agent/settings.json` → `packages`, code under `~/.pi/agent/npm/` |
+| 2 | `pi install` for every package in `hablo.json`, **and every `npm:`/`git:` package already listed in your `settings.json`**, that is not present on disk — so packages you added yourself come back after a reinstall too. An installed package that is not at its `hablo.json` pin is moved to it; `--update-packages` updates the unpinned ones | `~/.pi/agent/settings.json` → `packages`, code under `~/.pi/agent/npm/` |
 | 3 | Adds the `bedrouter/*` models to `enabledModels` **if an allowlist already exists** (creating one would hide every other provider), a few UX settings only where unset; `--default-model` also makes `bedrouter/auto` the default | `~/.pi/agent/settings.json` |
 | 4 | Writes pi-bedrouter settings (server home and stop-on-exit policy), a `.env` with `AWS_PROFILE`, and renders the ordered model stack in `bedrouter.json` from `hablo.json` | `~/.pi/agent/pi-bedrouter.json`, `~/.bedrouter/` |
 | 5 | If the AWS profile is missing, runs `aws configure sso --profile <p>` (interactive); if credentials are expired, runs `aws sso login` | `~/.aws/config`, SSO token cache |
@@ -50,7 +50,8 @@ Then: `pi --provider bedrouter --model auto`. For firstmate: `cd <your project> 
 | `--base-branch <name>` | Integration branch for the Jira-branch policy (default `develop` from the manifest) |
 | `--skip-cli` `--bin-dir <dir>` `--cli-model <m>` | Skip the `hablo` command, install it somewhere other than `~/.local/bin`, or change its default model (default: `auto`) |
 | `--skip-tools` `--update-tools` | Skip firstmate's tool dependencies, or reinstall them even when present |
-| `--update-packages` | Run `pi update` on every installed Pi package, not only the ones below `minVersions` |
+| `--update-packages` | Run `pi update` on the installed Pi packages that `hablo.json` does not pin |
+| `--no-firstmate-pull` | Leave the firstmate checkout at its current commit (`hablo update` passes this) |
 | `--skip-jira` `--no-tracker` | Skip Jira reporting and dispatch entirely |
 | `--skip-jira-agent` | Install Jira reporting but not the dispatch agent |
 | `--jira-agent-interval <seconds>` `--jira-agent-label <name>` | Override the dispatch poll interval or ready label |
@@ -110,6 +111,26 @@ session keys, no error text, and nothing per request. It does show that a named
 person worked on a given date and roughly how much, which in a public stats
 repository is world-readable. The stats repository's own README states that on
 its face.
+
+## Updates and releases
+
+A HABLO release is a git tag `vX.Y.Z` on this repository. The tag fixes the installer code, and `hablo.json` in
+that tag pins the exact version of every Pi package, bedrouter included. Every machine on a tag runs the same set.
+
+```sh
+hablo update --check    # show the current and the newest release, and each package pin that changes
+hablo update            # move to the newest release and install it
+```
+
+`hablo update` refuses to start while a Pi process or a `hablo-*` tmux session runs, because it replaces files that
+those processes loaded. It also refuses a checkout with uncommitted changes, or with commits that no remote branch
+contains. It stops the Jira agent, checks out the newest tag, and runs that release's installer with the arguments
+of your last install. It does not pull firstmate, update the Pi CLI, or update the firstmate tools. A full
+`./install.sh` run, `pi update --self`, and `--update-tools` still do those. If the new release fails to install,
+`hablo update` checks out the previous commit and installs it again.
+
+To publish a release, commit the pin changes in `hablo.json`, push the commit, and run `task release -- X.Y.Z`. The
+task runs the tests, then tags and pushes `vX.Y.Z`. [TODO/HABLO-UPDATE.md](TODO/HABLO-UPDATE.md) has the design.
 
 ## Backup, uninstall, reinstall
 

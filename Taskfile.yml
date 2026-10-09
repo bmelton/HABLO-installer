@@ -1,0 +1,47 @@
+version: "3"
+
+tasks:
+  secrets:
+    desc: Pull this repo's secrets from Infisical into .env
+    cmds:
+      - infisical export --format=dotenv > .env
+      - chmod 600 .env
+
+  test:
+    desc: Run the installer, Jira, and Dream tests
+    cmds:
+      - node --test test/
+      - task: jira:test
+      - task: dream:test
+
+  check:
+    desc: Print this machine's prerequisite checklist
+    cmds: [node install.mjs check]
+
+  release:
+    desc: "Tag and push a HABLO release, which `hablo update` installs (task release -- 0.1.0)"
+    requires:
+      vars: [CLI_ARGS]
+    preconditions:
+      - sh: '[[ "{{.CLI_ARGS}}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]'
+        msg: "give the version as X.Y.Z, for example: task release -- 0.1.0"
+      - sh: test -z "$(git status --porcelain)"
+        msg: the working tree has uncommitted changes
+      # hablo update refuses a checkout whose HEAD no remote branch contains, so an unpushed release could not be
+      # updated away from.
+      - sh: git fetch --quiet origin && test -n "$(git branch -r --contains HEAD)"
+        msg: push this commit to a remote branch first
+      - sh: test -z "$(git tag -l v{{.CLI_ARGS}})"
+        msg: v{{.CLI_ARGS}} already exists
+    cmds:
+      - task: test
+      - git tag -a v{{.CLI_ARGS}} -m "HABLO {{.CLI_ARGS}}"
+      - git push origin v{{.CLI_ARGS}}
+
+includes:
+  jira:
+    taskfile: jira/Taskfile.yml
+    dir: jira
+  dream:
+    taskfile: dream/Taskfile.yml
+    dir: dream

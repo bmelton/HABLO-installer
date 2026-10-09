@@ -3,17 +3,18 @@
 // Zero dependencies. Node 20+ to run; Node 22+ is required for OpenWiki itself (checked, not enforced).
 //
 //   node install.mjs check   print the prerequisite checklist; exit 1 if a required one is missing
+//   node install.mjs update [--check]   move this checkout to the newest release tag and install it (hablo update)
 //   node install.mjs backup [--to <dir>] [--with-history]   archive auth + trust (+ config; + sessions/caches/logs with the flag)
 //   node install.mjs uninstall [--yes] [--with-state] [--with-globals] [--with-firstmate]
 //                              [--with-services] [--remove-pi] [--all] [--no-backup] [--infer] [--receipt <path>]
 //   node install.mjs [--profile <aws-profile>] [--restore <tgz>] [--dry-run] [--optional] [--default-model]
 //                    (profile defaults to hablo.json; AWS_PROFILE in the environment also counts)
 //                    [--skip-aws] [--skip-probe] [--skip-agents] [--force-agents] [--home <dir>]
-//                    [--skip-firstmate] [--firstmate-dir <dir>] [--backend tmux|herdr] [--no-branch-policy] [--base-branch <name>]
+//                    [--skip-firstmate] [--no-firstmate-pull] [--firstmate-dir <dir>] [--backend tmux|herdr] [--no-branch-policy] [--base-branch <name>]
 //                    [--no-openwiki-policy] [--nautical|--no-tone-policy]
 //                    [--skip-cli] [--bin-dir <dir>] [--cli-model <m>]   the `hablo` command (default ~/.local/bin) and its Pi extension
 //                    [--skip-tools] [--update-tools]   firstmate's tool dependencies (treehouse, no-mistakes, *-axi)
-//                    [--update-packages]   pi update every installed Pi package, not only those below minVersions
+//                    [--update-packages]   pi update the installed Pi packages that hablo.json does not pin
 //                    [--skip-jira|--no-tracker] [--skip-jira-agent] [--jira-agent-interval <s>]
 //                    [--jira-agent-label <name>] [--no-jira-agent-service] [--jira-agent-bin-dir <dir>]
 //                    [--jira-env <path>]
@@ -24,7 +25,7 @@
 // Steps (each prints what it did or would do):
 //   0 restore     with --restore <tgz>: put personal state back (never overwrites an existing file unless --force-restore)
 //   1 preflight   prerequisite checklist (stops on a missing required item); pi installed with --install-pi
-//   2 packages    pi install npm:<pkg> for anything not yet in settings.json packages; pi update below minVersions
+//   2 packages    pi install npm:<pkg> for anything missing, and for any package not at its hablo.json pin
 //   3 settings    enabledModels += bedrouter/*; a few UX settings; optional default model
 //   4 bedrouter   ~/.pi/agent/pi-bedrouter.json, ~/.bedrouter/.env and bedrouter.json (rendered from hablo.json),
 //                 including the team-stats publish block when the manifest names a repo
@@ -143,6 +144,64 @@ if (args[0] === "backup") {
   for (const p of rel) log(`  ${p}${fs.lstatSync(path.join(home, p)).isSymbolicLink() ? "  (symlink; archived its content)" : ""}`);
   log(`\nRestore later with:  node install.mjs --profile <p> --restore ${out}`);
   process.exit(0);
+}
+
+// ---- update subcommand ------------------------------------------------------------------------------------------------
+// Moves this checkout to the newest release tag and re-runs that release's installer. TODO/HABLO-UPDATE.md has the
+// design; the short version is that a tag pins everything, so an update is a checkout plus an ordinary install.
+if (args[0] === "update") {
+  const check = flag("check");
+  const git = (...a) => run("git", ["-C", here, ...a], { timeout: 120_000 });
+  const out = (r) => (r.status === 0 ? (r.stdout ?? "").trim() : "");
+
+  // An update replaces files that a running Pi or captain already loaded, so it waits for them to finish.
+  const live = out(run("tmux", ["ls", "-F", "#{session_name}"])).split("\n").filter((n) => n.startsWith("hablo-")).map((n) => `tmux session ${n}`);
+  for (const line of out(run("ps", ["-axo", "pid=,command="])).split("\n")) {
+    const [, pid, cmd] = line.trim().match(/^(\d+)\s+(.*)$/) ?? [];
+    if (pid && Number(pid) !== process.pid && /(^|\/)pi(\s|$)/.test(cmd)) live.push(`pid ${pid}: ${cmd.slice(0, 100)}`);
+  }
+  if (live.length) {
+    const msg = `these are running and would keep the old code loaded:\n  - ${live.join("\n  - ")}\nQuit them, then run hablo update again.`;
+    if (!check) fail(msg);
+    log(`note: ${msg}`);
+  }
+
+  if (out(git("status", "--porcelain"))) fail(`${here} has uncommitted changes. Commit or stash them; hablo update only moves a clean checkout.`);
+  log(`fetching releases for ${here}`);
+  if (git("fetch", "--quiet", "--tags", "origin").status !== 0) fail(`git fetch failed in ${here}; check the network and the origin remote`);
+  // A tag checkout leaves the branch behind, so commits that exist only here would drop out of sight.
+  if (!out(git("branch", "-r", "--contains", "HEAD"))) fail(`HEAD in ${here} has commits that no remote branch contains. Push them first, or run node install.mjs from this checkout instead.`);
+
+  const tags = out(git("tag", "-l", "v*")).split("\n").filter((t) => /^v\d+\.\d+\.\d+$/.test(t));
+  if (!tags.length) fail("there are no release tags yet. Tag one with: task release -- <version>");
+  const newest = tags.reduce((a, b) => (versionGte(a, b) ? a : b));
+  const current = out(git("describe", "--tags", "--exact-match", "HEAD")) || out(git("rev-parse", "--short", "HEAD"));
+  if (current === newest) { log(`up to date: ${newest}`); process.exit(0); }
+
+  const pins = (pkgs) => new Map((pkgs ?? []).filter((p) => p.startsWith("npm:")).map((p) => { const s = p.slice(4), i = s.lastIndexOf("@"); return i > 0 ? [s.slice(0, i), s.slice(i + 1)] : [s, "latest"]; }));
+  const from = pins(manifest.pi.packages);
+  const to = pins(readJsonText(out(git("show", `${newest}:hablo.json`)), {})?.pi?.packages);
+  log(`${current} -> ${newest}`);
+  for (const name of new Set([...from.keys(), ...to.keys()])) if (from.get(name) !== to.get(name)) log(`  ${name}  ${from.get(name) ?? "(new)"} -> ${to.get(name) ?? "(removed)"}`);
+  if (check) process.exit(0);
+
+  const svc = manifest.jira?.agent?.service ?? {};
+  const stopAgent = () => {
+    if (process.platform === "darwin" && svc.launchdLabel) run("launchctl", ["bootout", `gui/${process.getuid()}/${svc.launchdLabel}`]);
+    else if (svc.systemdUnit) run("systemctl", ["--user", "stop", `${svc.systemdUnit}.timer`, `${svc.systemdUnit}.service`]);
+  };
+  // The last run's own arguments, so an update installs with the same profile and options the machine was set up with.
+  const last = readJson(receiptPath, { runs: [] }).runs?.at(-1)?.argv ?? [];
+  const argv = [...last.filter((a) => a !== "--dry-run" && a !== "--no-firstmate-pull"), "--no-firstmate-pull"];
+  const install = () => spawnSync(process.execPath, [path.join(here, "install.mjs"), ...argv], { stdio: "inherit" }).status === 0;
+  const previous = out(git("symbolic-ref", "-q", "--short", "HEAD")) || out(git("rev-parse", "HEAD"));
+  stopAgent();
+  if (git("checkout", "--quiet", "--detach", newest).status === 0 && install()) { log(`\nupdated to ${newest}`); process.exit(0); }
+  // A failed release install leaves the machine half-moved. Putting the previous release back is the safer state.
+  console.error(`\nthe ${newest} install failed; restoring ${previous}`);
+  stopAgent();
+  if (git("checkout", "--quiet", previous).status === 0 && install()) fail(`update to ${newest} failed and ${previous} is restored. The output above shows why.`);
+  fail(`update to ${newest} failed, and restoring ${previous} failed too. Run: git -C ${here} checkout ${previous} && node ${path.join(here, "install.mjs")} ${argv.join(" ")}`);
 }
 
 // ---- prerequisites ----------------------------------------------------------------------------------------------------
@@ -335,14 +394,6 @@ if (!piBin && !DRY) fail(`pi is not installed. Re-run with --install-pi, or inst
 note(piBin ? `pi   ${run("pi", ["--version"]).stdout?.trim() || piBin}` : `pi   would be installed (${cliPkg})`);
 const awsBin = which("aws");
 const goBin = which("go");
-for (const [pkg, min] of Object.entries(manifest.pi.minVersions ?? {})) {
-  if (pkg.startsWith("$")) continue;
-  const pkgPath = path.join(agentDir, "npm", "node_modules", pkg, "package.json");
-  const installedVersion = readJson(pkgPath, null)?.version;
-  if (!installedVersion) note(`${pkg} not installed yet (needs >= ${min}; step 2 will install it)`);
-  else if (versionGte(installedVersion, min)) note(`${pkg} ${installedVersion} (>= ${min})`);
-  else note(`${pkg} ${installedVersion} (needs >= ${min}; step 2 will update it)`);
-}
 
 // ---- 2 packages ------------------------------------------------------------------------------------------------
 step(2, "pi packages");
@@ -352,27 +403,41 @@ const installed = new Set(settings.packages ?? []);
 // Everything the manifest asks for, plus anything settings.json already lists (packages you added yourself): after a
 // reinstall the list survives in settings/dotfiles but the code under ~/.pi/agent/npm does not, so honour the list.
 const listedRemote = [...installed].filter((p) => /^(npm|git):/.test(p));
-const wanted = [...new Set([...manifest.pi.packages, ...(flag("optional") ? manifest.pi.optionalPackages : []), ...listedRemote])];
+const bareOf = (pkg) => pkg.replace(/^npm:/, "").replace(/@[^@/]+$/, "").replace(/^git:.*\/([^/@]+?)(?:\.git)?(?:@.*)?$/, "$1");
+const pinOf = (pkg) => { if (!pkg.startsWith("npm:")) return undefined; const s = pkg.slice(4), i = s.lastIndexOf("@"); return i > 0 ? s.slice(i + 1) : undefined; };
+// One entry per package name, the manifest first: settings.json still lists the previous release's pin after an
+// update, and installing that entry too would put the old version straight back.
+const byName = new Map();
+for (const p of [...manifest.pi.packages, ...(flag("optional") ? manifest.pi.optionalPackages : []), ...listedRemote]) if (!byName.has(bareOf(p))) byName.set(bareOf(p), p);
+const wanted = [...byName.values()];
 const localPaths = [...installed].filter((p) => !/^(npm|git):/.test(p));
 for (const p of localPaths) if (!fs.existsSync(path.resolve(agentDir, p))) note(`${p} is listed as a path package but the path does not exist; clone or remove it from settings.json`);
 for (const pkg of wanted) {
-  const bare = pkg.replace(/^npm:/, "").replace(/@[^@/]+$/, "").replace(/^git:.*\/([^/@]+?)(?:\.git)?(?:@.*)?$/, "$1");
-  const listed = installed.has(pkg) || [...installed].some((p) => p.endsWith(`/${bare}`));
+  const bare = bareOf(pkg), pin = pinOf(pkg);
+  const listed = [...installed].some((p) => p === pkg || bareOf(p) === bare || p.endsWith(`/${bare}`));
+  const version = () => readJson(path.join(agentDir, "npm", "node_modules", bare, "package.json"), null)?.version;
+  // Fatal, because step 4 renders a config for the release's bedrouter, and an older one cannot read it.
+  const checkPin = () => { if (pin && version() !== pin) fail(`${bare} is ${version() ?? "missing"} after pi install; this release pins ${pin}`); };
   // listed in settings.json but absent on disk (e.g. after a reinstall that restored settings): install anyway
   const onDisk = /^(npm|git):/.test(pkg) ? fs.existsSync(path.join(agentDir, "npm", "node_modules", bare, "package.json")) : true;
   if (listed && onDisk) {
-    // An installed package is otherwise never touched, so a machine set up before a minimum bump keeps the old code.
-    const min = manifest.pi.minVersions?.[bare];
-    const version = () => readJson(path.join(agentDir, "npm", "node_modules", bare, "package.json"), null)?.version;
     const before = version();
-    const stale = Boolean(min && before && !versionGte(before, min));
-    if (!stale && !flag("update-packages")) { note(`${pkg} already installed`); continue; }
-    did(`pi update --extension ${pkg}${stale ? ` (${before} < ${min})` : ""}`);
+    if (pin && before !== pin) {
+      // pi replaces the old entry in settings.json with the new pin, so this is a move, not a second copy.
+      did(`pi install ${pkg}  (${before ?? "unknown"} -> ${pin})`);
+      if (!DRY) {
+        const r = run("pi", ["install", pkg], { inherit: true });
+        if (r.status !== 0) fail(`pi install ${pkg} failed (exit ${r.status})`);
+        checkPin();
+      }
+      continue;
+    }
+    // A pinned package is already at its pin, and pi update never moves a pin anyway.
+    if (pin || !flag("update-packages")) { note(`${pkg} already installed${before ? ` (${before})` : ""}`); continue; }
+    did(`pi update --extension ${pkg}`);
     if (!DRY) {
       const r = run("pi", ["update", "--extension", pkg], { inherit: true });
       if (r.status !== 0) fail(`pi update --extension ${pkg} failed (exit ${r.status})`);
-      // Fatal, because step 4 writes a config that only a new enough bedrouter can read.
-      if (min && !versionGte(version() ?? "0", min)) fail(`${pkg} is still ${version()} after pi update; HABLO needs >= ${min}`);
     }
     continue;
   }
@@ -381,6 +446,7 @@ for (const pkg of wanted) {
   if (!DRY) {
     const r = run("pi", ["install", pkg], { inherit: true });
     if (r.status !== 0) fail(`pi install ${pkg} failed (exit ${r.status})`);
+    checkPin();
     record({ kind: "pi.package", name: pkg, wasListed: listed, wasOnDisk: onDisk });
   }
 }
@@ -661,7 +727,8 @@ const fm = manifest.firstmate;
 const fmDir = expand(opt("firstmate-dir", fm.dir));
 if (flag("skip-firstmate")) note("skipped (--skip-firstmate)");
 else {
-  if (fs.existsSync(path.join(fmDir, ".git"))) {
+  if (fs.existsSync(path.join(fmDir, ".git")) && flag("no-firstmate-pull")) note(`${fmDir} left at its current commit (--no-firstmate-pull)`);
+  else if (fs.existsSync(path.join(fmDir, ".git"))) {
     const before = run("git", ["-C", fmDir, "rev-parse", "HEAD"]).stdout?.trim();
     did(`git -C ${fmDir} pull --ff-only`);
     if (!DRY) {
@@ -757,7 +824,7 @@ else {
     did(`${cur === null ? "install" : "update"} ${path.relative(home, dst)}`);
   };
   const cliModel = opt("cli-model", cli.model ?? "auto");
-  installFile(path.join(here, "bin", "hablo"), path.join(binDir, "hablo"), (t) => t.replace(/__FM_ROOT__/g, fmDir).replace(/__HABLO_HOME__/g, habloHome).replace(/__PROVIDER__/g, cli.provider).replace(/__MODEL__/g, cliModel), 0o755);
+  installFile(path.join(here, "bin", "hablo"), path.join(binDir, "hablo"), (t) => t.replace(/__FM_ROOT__/g, fmDir).replace(/__HABLO_INSTALLER__/g, here).replace(/__HABLO_HOME__/g, habloHome).replace(/__PROVIDER__/g, cli.provider).replace(/__MODEL__/g, cliModel), 0o755);
   note(`hablo defaults to --provider ${cli.provider} --model ${cliModel} (HABLO_PROVIDER / HABLO_MODEL or your own flags override)`);
   installFile(path.join(here, "pi", "extensions", "hablo-captain.ts"), path.join(habloHome, "hablo-captain.ts"), (t) => t, 0o644);
   const tonePath = path.join(habloHome, "tone.md");

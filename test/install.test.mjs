@@ -29,10 +29,10 @@ function fixture() {
   const settings = { packages: manifest.pi.packages, enabledModels: ["openai/test"] };
   fs.writeFileSync(path.join(agentDir, "settings.json"), JSON.stringify(settings, null, 2) + "\n");
   for (const spec of manifest.pi.packages) {
-    const name = spec.replace(/^npm:/, "");
+    const [, name, version] = spec.match(/^npm:(.+)@([^@]+)$/);
     const pkgDir = path.join(agentDir, "npm", "node_modules", name);
     fs.mkdirSync(pkgDir, { recursive: true });
-    fs.writeFileSync(path.join(pkgDir, "package.json"), JSON.stringify({ name, version: "1.0.0" }));
+    fs.writeFileSync(path.join(pkgDir, "package.json"), JSON.stringify({ name, version }));
   }
   const bedrouter = path.join(agentDir, "npm", "node_modules", "bedrouter");
   fs.mkdirSync(path.join(bedrouter, "dist"), { recursive: true });
@@ -512,18 +512,20 @@ test("an unattended run is never asked about the credential", () => {
   }
 });
 
-test("an installed package below minVersions is updated, a current one is left alone", () => {
+test("an installed package off its pin is moved to it, one at its pin is left alone", () => {
   const f = fixture();
   const calls = path.join(f.dir, "pi-calls");
   writeExecutable(path.join(f.fakeBin, "pi"), `#!/bin/sh\n[ "\${1:-}" = --version ] && echo 'pi test'\nprintf '%s\\n' "$*" >> ${JSON.stringify(calls)}\nexit 0\n`);
   const pkgJson = path.join(f.agentDir, "npm", "node_modules", "pi-bedrouter", "package.json");
 
   install(f);
-  assert.ok(!(fs.existsSync(calls) && fs.readFileSync(calls, "utf8").includes("update")), "a current package must not be updated");
+  assert.ok(!(fs.existsSync(calls) && /^(install|update) /m.test(fs.readFileSync(calls, "utf8"))), "a package at its pin must not be touched");
 
+  const pin = manifest.pi.packages.find((p) => p.startsWith("npm:pi-bedrouter@"));
   fs.writeFileSync(pkgJson, JSON.stringify({ name: "pi-bedrouter", version: "0.6.0" }));
-  assert.throws(() => install(f, ["--skip-cli"]), (e) => /still 0\.6\.0 after pi update/.test(e.stderr));
-  assert.match(fs.readFileSync(calls, "utf8"), /^update --extension npm:pi-bedrouter$/m);
+  // The fake pi installs nothing, so the version check after the install must stop the run.
+  assert.throws(() => install(f, ["--skip-cli"]), (e) => /pi-bedrouter is 0\.6\.0 after pi install; this release pins/.test(e.stderr));
+  assert.match(fs.readFileSync(calls, "utf8"), new RegExp(`^install ${pin.replace(/[.]/g, "\\.")}$`, "m"));
 });
 
 test("a required prerequisite stops the install before anything is written", () => {
@@ -540,4 +542,37 @@ test("a required prerequisite stops the install before anything is written", () 
 
   // Without the AWS step, v1 is only advisory.
   assert.equal(check("check", "--profile", "").status, 0);
+});
+
+test("update plans the move to the newest release tag and refuses a dirty checkout", () => {
+  const f = fixture();
+  const g = (cwd, ...a) => execFileSync("git", ["-c", "user.email=t@example.invalid", "-c", "user.name=t", ...a], { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
+  const src = path.join(f.dir, "src");
+  fs.cpSync(root, src, { recursive: true, filter: (p) => !/\/(\.git|node_modules)(\/|$)/.test(p.slice(root.length)) });
+  g(f.dir, "init", "--quiet", src);
+  g(src, "add", "-A"); g(src, "commit", "--quiet", "-m", "one"); g(src, "tag", "v0.1.0");
+  const manifestPath = path.join(src, "hablo.json");
+  fs.writeFileSync(manifestPath, fs.readFileSync(manifestPath, "utf8").replace(/"npm:pi-bedrouter@[^"]+"/, '"npm:pi-bedrouter@9.9.9"'));
+  g(src, "commit", "--quiet", "-am", "two"); g(src, "tag", "v0.2.0");
+  g(f.dir, "clone", "--quiet", "--bare", src, path.join(f.dir, "origin.git"));
+  const work = path.join(f.dir, "work");
+  g(f.dir, "clone", "--quiet", path.join(f.dir, "origin.git"), work);
+  g(work, "checkout", "--quiet", "v0.1.0");
+
+  const update = (...a) => {
+    try { return { status: 0, out: execFileSync(process.execPath, [path.join(work, "install.mjs"), "update", ...a], { encoding: "utf8", env: { ...process.env, HOME: f.home, PI_CODING_AGENT_DIR: f.agentDir }, stdio: ["ignore", "pipe", "pipe"] }) }; }
+    catch (e) { return { status: e.status, out: `${e.stdout}${e.stderr}` }; }
+  };
+  const plan = update("--check");
+  assert.equal(plan.status, 0, plan.out);
+  assert.match(plan.out, /v0\.1\.0 -> v0\.2\.0/);
+  assert.match(plan.out, /pi-bedrouter {2}\S+ -> 9\.9\.9/);
+  assert.equal(g(work, "describe", "--tags").trim(), "v0.1.0", "--check must not move the checkout");
+
+  fs.writeFileSync(path.join(work, "stray.txt"), "x");
+  assert.match(update("--check").out, /has uncommitted changes/);
+  fs.rmSync(path.join(work, "stray.txt"));
+
+  g(work, "checkout", "--quiet", "v0.2.0");
+  assert.match(update("--check").out, /up to date: v0\.2\.0/);
 });
