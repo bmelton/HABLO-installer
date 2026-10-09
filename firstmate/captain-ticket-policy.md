@@ -1,5 +1,19 @@
 <!-- HABLO:TICKET-POLICY:START -->
-## Jira reporting
+## Jira
+
+Jira is private. Never use `web_search`, a browser, or any open-web fetch for ticket content. Credentials are loaded by the `hablo-jira` CLI from its env file; do not read `.env` yourself.
+
+### Lookup
+
+For any issue key, summary, description, comments, status, or search:
+
+- `hablo-jira read --key <JIRA-KEY>`
+- `hablo-jira search --jql '<jql>'`
+- `hablo-jira doctor [--key <JIRA-KEY>]` when auth or transitions look wrong
+
+Include this lookup rule in every relevant crewmate brief.
+
+### Reporting
 
 Keep the Jira ticket current throughout a ticket workflow. Include this duty verbatim in every relevant crewmate brief; each crewmate reports its own stage and a reporting failure never stops delivery.
 
