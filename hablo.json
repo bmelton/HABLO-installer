@@ -60,8 +60,8 @@
       "enabled": true,
       "honorClientModel": false,
       "cacheHitRate": 0.8,
-      "$comment": "baselineAlias: the rung the dashboard prices the \"no router\" counterfactual at. null takes the dearest enabled rung that serves explore, which is what a client reaches for when there is no router.",
-      "baselineAlias": null,
+      "$comment": "baselineAlias: the rung the dashboard prices the \"no router\" counterfactual at. Pinned, because null takes the dearest enabled rung that serves explore, and the entitlement probe changes which rung that is: when opus loses entitlement the baseline silently drops to glm-5 and every savings figure re-bases without saying so, which makes two screenshots incomparable. A pinned rung does not need to be enabled: the probe disables a rung once its fallbacks run out, but leaves its prices intact, and pricing a counterfactual reads only the prices. Requires bedrouter with the disabled-baseline fix; an older build rejects a disabled alias.",
+      "baselineAlias": "opus",
       "classifier": {
         "enabled": true,
         "model": "nova-micro",
