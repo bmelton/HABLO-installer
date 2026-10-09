@@ -16,6 +16,7 @@ export default function (pi: ExtensionAPI) {
   const project = process.env.HABLO_PROJECT;
   const name = process.env.HABLO_PROJECT_NAME || (project ? path.basename(project) : "");
   if (!root || !project) return; // launched some other way: stay inert
+  const piExtensions = (process.env.HABLO_PI_EXTENSIONS || "").split(/\s+/).filter(Boolean);
 
   const agentsFile = path.join(root, "AGENTS.md");
   const toneFile = path.join(process.env.HABLO_HOME || path.join(os.homedir(), ".hablo"), "tone.md");
@@ -54,7 +55,22 @@ export default function (pi: ExtensionAPI) {
     // also name `bin/fm-*.sh`, and the nudge's wording is a fixed literal that the ahoy skill matches whole, so it
     // cannot be rewritten at all. A relative path from either source runs in the project directory and exits 127,
     // which reads convincingly as a missing file. State the general rule instead of patching each source.
-    `Some instructions reach you from outside that manual: firstmate's skills, and the session-start nudge, whose wording is fixed and cannot be rewritten. Those still say \`bin/fm-*.sh\`. **Any \`bin/fm-*.sh\` path, from any source, is relative to \`${root}\`, never to your working directory.** Run \`${root}/bin/fm-<name>.sh\`, or just \`fm-<name>.sh\` since \`${root}/bin\` is on PATH. A \`bin/fm-*.sh\` that exits 127 or reports "No such file or directory" means you ran it from the wrong directory: re-run it with the absolute path. It does not mean the script is missing, and it is never a reason to re-clone or reinstall firstmate.`,
+    `Some instructions reach you from outside that manual: firstmate's skills, and the session-start nudge, whose wording is fixed and cannot be rewritten. Those still say \`bin/fm-*.sh\`. **Any \`bin/fm-*.sh\` path, from any source, is relative to \`${root}\`, never to your working directory.** Run \`${root}/bin/fm-<name>.sh\`, or just \`fm-<name>.sh\` since \`${root}/bin\` is on PATH. A \`bin/fm-*.sh\` that exits 127 or reports "No such file or directory" means you ran it from the wrong directory: re-run it with the absolute path. Check \`ls ${root}/bin\` before you conclude anything else: either the script is there and you called it wrong, or the name is one you invented. Neither case is a reason to re-clone or reinstall firstmate.`,
+    "",
+    // The supervision protocol says to confirm both extensions loaded but never says how, and `hablo` starts Pi
+    // outside the checkout where auto-discovery would show it. A captain left to invent a check reaches for
+    // `ps aux | grep fm-primary-pi-watch.ts`, which cannot match an in-process extension, reads the guaranteed
+    // false negative as a broken install, and invents a launcher (`bin/fm-primary`) to restart Pi with.
+    `**Supervision is already wired. Do not rebuild it.** \`hablo\` started this Pi process with ${piExtensions.length ? piExtensions.map((f) => `\`${f}\``).join(", ") : "firstmate's tracked Pi extensions"} on the command line, so they loaded before your first turn. Pi runs an extension inside this process: \`ps aux\` and \`pgrep\` never match an extension file, and a grep that finds nothing proves nothing. To check loading, look for the \`fm_watch_arm_pi\` tool in your own tool list, or run \`${root}/bin/fm-session-start.sh\` and read its \`PI_WATCH_EXTENSION\` line. Repair a watcher with the \`fm_watch_arm_pi\` tool, never through the bash tool.`,
+    "",
+    `You cannot restart your own session, and you must not try. Never run \`pi -e ...\` yourself: that starts a second Pi without this preamble and without the other extensions. If a restart is genuinely needed, say so and ask the user to quit and run \`hablo\` again.`,
+    "",
+    // Pi prints "Package updates are available. Run pi update --extensions" at startup, meaning run it in a shell.
+    // A user who types that line at the Pi prompt sends it here as a message instead, so nothing updates and the
+    // banner returns every session. Say what it is, and keep the swap out of the live process.
+    `If the user types \`pi update --extensions\` (or any other \`pi\` subcommand) at the prompt, they are repeating a startup banner that meant "run this in a shell", and it reached you as a message instead. Do not treat it as a request about firstmate or about your own extensions. Tell them it updates Pi's npm packages under \`~/.pi/agent/npm\` and must run outside a live session, because it replaces files this process has already loaded: they should quit, run it in their shell, and start \`hablo\` again.`,
+    "",
+    `There is no \`bin/fm-primary\`. Before you run any \`fm-*\` command the manual did not name, confirm it exists with \`ls ${root}/bin\`. If it is not there, you invented it: find the real command instead. An invented command that exits 127 is never evidence that firstmate is damaged, and re-cloning or reinstalling firstmate is never your repair for it. The repository is \`kunchenguid/firstmate\`, and it is already cloned at \`${root}\`.`,
     "",
     "---",
     "",

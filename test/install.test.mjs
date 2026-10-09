@@ -77,7 +77,7 @@ function runInstalledHablo(f, args = [], env = {}) {
   if (!fs.existsSync(path.join(project, ".git"))) execFileSync("git", ["init", "--quiet", project]);
   const calls = path.join(f.dir, "pi-call.json");
   fs.rmSync(calls, { force: true });
-  writeExecutable(path.join(f.fakeBin, "pi"), `#!/bin/sh\nprintf '%s\\n' "$HABLO_CREW_MODEL" > ${JSON.stringify(calls)}\nprintf '%s\\n' "$@" >> ${JSON.stringify(calls)}\n`);
+  writeExecutable(path.join(f.fakeBin, "pi"), `#!/bin/sh\nprintf '%s\\n' "$HABLO_CREW_MODEL" > ${JSON.stringify(calls)}\nprintf '%s\\n' "$@" >> ${JSON.stringify(calls)}\nprintf 'HABLO_PI_EXTENSIONS=%s\\n' "$HABLO_PI_EXTENSIONS" >> ${JSON.stringify(calls)}\n`);
   try {
     const stderr = execFileSync(path.join(f.home, ".local", "bin", "hablo"), args, {
       cwd: project,
@@ -212,6 +212,37 @@ test("hablo resolves one captain/crew model and refuses an ambiguous bare model"
     const full = runInstalledHablo(f, ["--model", "openai-codex/gpt-5.3-codex"]);
     assert.equal(full.status, 0);
     assert.match(full.call, /^openai-codex\/gpt-5\.3-codex/m);
+  } finally {
+    fs.rmSync(f.dir, { recursive: true, force: true });
+  }
+});
+
+// A captain that cannot see which extensions loaded checks with `ps aux`, gets a guaranteed false negative because
+// Pi runs extensions in-process, and then invents a launcher to restart Pi with. HABLO_PI_EXTENSIONS is what
+// hablo-captain.ts reads to say so in the preamble, so it must list exactly the files that got an -e flag.
+test("hablo reports the supervision extensions it loaded, and stays quiet about ones it did not", () => {
+  const f = fixture();
+  try {
+    install(f);
+    const ext = path.join(f.firstmate, ".pi", "extensions");
+    fs.mkdirSync(ext, { recursive: true });
+    // hablo resolves FM_ROOT with `pwd -P`, and on macOS the temp dir is a symlink into /private.
+    const real = path.join(fs.realpathSync(f.firstmate), ".pi", "extensions");
+    fs.writeFileSync(path.join(ext, "fm-primary-pi-watch.ts"), "");
+    fs.writeFileSync(path.join(ext, "fm-calm.ts"), "");
+
+    const run = runInstalledHablo(f);
+    assert.equal(run.status, 0);
+    const reported = run.call.match(/^HABLO_PI_EXTENSIONS=(.*)$/m)[1].split(" ").filter(Boolean);
+    assert.deepEqual(reported, [path.join(real, "fm-primary-pi-watch.ts"), path.join(real, "fm-calm.ts")]);
+    for (const p of reported) assert.match(run.call, new RegExp(`^-e\\n${p.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`, "m"));
+    assert.ok(!run.call.includes("fm-primary-turnend-guard.ts"), run.call);
+
+    // Nothing on disk: the export must be empty, not the string "missing", and hablo must still launch.
+    fs.rmSync(ext, { recursive: true, force: true });
+    const bare = runInstalledHablo(f);
+    assert.equal(bare.status, 0);
+    assert.match(bare.call, /^HABLO_PI_EXTENSIONS=$/m);
   } finally {
     fs.rmSync(f.dir, { recursive: true, force: true });
   }

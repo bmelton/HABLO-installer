@@ -123,7 +123,12 @@ fi
 export HABLO_PROJECT="$proj" HABLO_PROJECT_NAME="$name"
 ext="$root_real/.pi/extensions"
 set -- -e "$HABLO_HOME/hablo-captain.ts" "$@"
+loaded=
 for f in fm-primary-turnend-guard.ts fm-primary-pi-watch.ts fm-branch-supervision.ts fm-calm.ts; do
-  [ -f "$ext/$f" ] && set -- -e "$ext/$f" "$@"
+  [ -f "$ext/$f" ] && { set -- -e "$ext/$f" "$@"; loaded="$loaded $ext/$f"; }
 done
+# The captain reads this back in hablo-captain.ts. A captain that cannot see what was loaded goes looking with
+# `ps aux`, finds nothing because Pi runs extensions in-process, and then tries to restart a Pi it invents a
+# launcher for. Telling it what is already loaded is what stops that.
+export HABLO_PI_EXTENSIONS="${loaded# }"
 exec pi "$@"
