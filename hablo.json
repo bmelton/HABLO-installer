@@ -163,6 +163,7 @@
     "projects": {
       "HAB": { "dir": "~/projects/ai/HABLO-installer", "baseBranch": "main", "mode": "direct-PR", "statuses": { "inProgress": "In Progress", "inReview": "In Review" } }
     },
+    "$comment6": "root: set it (for example \"~/projects\") to confine every dispatched captain's writes to that directory with sandbox-exec, because a Jira description is untrusted input. A project's own root overrides it. Unset means unconfined. A root at or above ~ is refused, and requireSandbox (default true) refuses dispatch where sandbox-exec is missing.",
     "reporting": { "enabled": true, "transitions": true, "stages": ["triage", "spec", "tests", "implementation", "review", "done"] },
     "agent": {
       "enabled": true,

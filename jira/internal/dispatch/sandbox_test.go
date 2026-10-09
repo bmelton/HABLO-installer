@@ -65,3 +65,21 @@ func TestSandboxCommandFallsBackWhenUnconfigured(t *testing.T) {
 		t.Fatalf("argv = %v, want a bare sh invocation when no root is set", argv)
 	}
 }
+
+func TestSandboxCommandConfinesWhenRootSet(t *testing.T) {
+	if !SandboxAvailable() {
+		t.Skip("sandbox-exec unavailable on this platform")
+	}
+	run := t.TempDir()
+	argv, e := sandboxCommand(config.Config{}, t.TempDir(), run, "/tmp/x.sh")
+	if e != nil {
+		t.Fatal(e)
+	}
+	profile := filepath.Join(run, "sandbox.sb")
+	if strings.Join(argv, " ") != "sandbox-exec -f "+profile+" sh /tmp/x.sh" {
+		t.Fatalf("argv = %v, want the script wrapped in sandbox-exec", argv)
+	}
+	if _, e := os.Stat(profile); e != nil {
+		t.Fatalf("profile not written: %v", e)
+	}
+}

@@ -755,8 +755,16 @@ else {
   jira.envSource = expand(opt("jira-env", jira.envSource ?? ""));
   for (const p of Object.values(jira.projects ?? {})) {
     p.dir = expand(p.dir);
+    if (p.root) p.root = expand(p.root);
     if (!fs.existsSync(p.dir)) note(`mapped Jira repository is not cloned yet: ${p.dir}`);
   }
+  if (jira.root) jira.root = expand(jira.root);
+  // The paths outside the root a confined captain still writes: Pi and bedrouter state, this run's home, and the
+  // firstmate directories its extensions write. firstmate's bin/ stays out so a captain cannot rewrite its own scripts.
+  jira.harnessDir = fmDir;
+  jira.sandboxWritable = [piDir, brHome, jiraHome, ...["state", "data", "projects"].map((d) => path.join(fmDir, d))];
+  const roots = [jira.root, ...Object.values(jira.projects ?? {}).map((p) => p.root)].filter(Boolean);
+  note(roots.length ? `captains confined to ${[...new Set(roots)].join(", ")}${jira.requireSandbox === false ? " where sandbox-exec exists" : ""}` : "captains run unconfined (no jira.root in hablo.json)");
   const jiraHomeExisted = fs.existsSync(jiraHome);
   if (!DRY) { fs.mkdirSync(jiraBinDir, { recursive: true }); fs.mkdirSync(path.join(jiraHome, "log"), { recursive: true, mode: 0o700 }); fs.mkdirSync(path.join(jiraHome, "runs"), { recursive: true, mode: 0o700 }); if (!jiraHomeExisted) record({ kind: "dir.create", path: homePath(jiraHome), wasPresent: false }); }
   const builds = [["hablo-jira", "./cmd/hablo-jira"], ...(!agentSkipped ? [[jira.agent.binName ?? "hablo-jira-agent", "./cmd/hablo-jira-agent"]] : [])];

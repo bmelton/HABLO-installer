@@ -29,7 +29,7 @@ func TestRenderAndDryRun(t *testing.T) {
 	}
 }
 func TestPreflightRejectsMissingRepository(t *testing.T) {
-	if e := Preflight(config.Project{Dir: filepath.Join(t.TempDir(), "missing"), BaseBranch: "main", Mode: "direct-PR"}, true); e == nil {
+	if e := Preflight(config.Config{}, config.Project{Dir: filepath.Join(t.TempDir(), "missing"), BaseBranch: "main", Mode: "direct-PR"}, true); e == nil {
 		t.Fatal("missing repo accepted")
 	}
 }
