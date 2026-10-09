@@ -25,7 +25,7 @@
 // Steps (each prints what it did or would do):
 //   0 restore     with --restore <tgz>: put personal state back (never overwrites an existing file unless --force-restore)
 //   1 preflight   prerequisite checklist (stops on a missing required item); pi installed with --install-pi
-//   2 packages    pi install npm:<pkg> for anything missing, and for any package not at its hablo.json pin
+//   2 packages    pi install npm:<pkg> for anything missing, and for any package not at its hablo.json pin (Pi puts user packages in npm's global root)
 //   3 settings    enabledModels += bedrouter/*; a few UX settings; optional default model
 //   4 bedrouter   ~/.pi/agent/pi-bedrouter.json, ~/.bedrouter/.env and bedrouter.json (rendered from hablo.json),
 //                 including the team-stats publish block when the manifest names a repo
@@ -228,7 +228,7 @@ const SOURCES = {
   tmux: { brew: "tmux", apt: "tmux", dnf: "tmux", pacman: "tmux" },
   jq: { brew: "jq", apt: "jq", dnf: "jq", pacman: "jq" },
   unzip: { brew: "unzip", apt: "unzip", dnf: "unzip", pacman: "unzip" },
-  node: { brew: "node", pacman: "nodejs npm", any: { why: "distro Node is usually older than 20", needs: ["curl"], cmds: ["curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.3/install.sh | bash", "nvm install 22   # in a new shell"] } },
+  node: { brew: "node", pacman: "nodejs npm", any: { why: "distro Node is usually older than HABLO needs", needs: ["curl"], cmds: ["curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.3/install.sh | bash", "nvm install 22   # need 22.19+ for current Pi; then open a new shell"] } },
   aws: {
     brew: "awscli",
     darwin: { needs: ["curl"], cmds: ["curl -fsSL https://awscli.amazonaws.com/AWSCLIV2.pkg -o /tmp/AWSCLIV2.pkg", "sudo installer -pkg /tmp/AWSCLIV2.pkg -target /"] },
@@ -266,13 +266,25 @@ function prerequisites() {
   const awsOn = !flag("skip-aws") && Boolean(profile);
 
   const node = process.versions.node;
-  const nodeOk = versionGte(node, "20.0.0");
-  add("required", `Node.js 20+ (found ${node}${nodeOk ? "" : sourceOf("node")})`, nodeOk, remedy("node"));
   const minPi = manifest.pi.minCliVersion;
+  const cliPkgName = manifest.pi.cliPackage;
+  // Pi 0.75+ declares engines.node >= 22.19.0. Unpinned `npm install -g` then skips latest and silently
+  // installs legacy-node20 (0.74.x), which is below minCliVersion — so Node must clear Pi's engines first.
+  const piNodeMin = (() => {
+    try {
+      const eng = JSON.parse(run("npm", ["view", `${cliPkgName}@${minPi}`, "engines", "--json"], { timeout: 30_000 }).stdout || "{}");
+      return String(eng.node ?? "").match(/>=\s*(\d+\.\d+\.\d+)/)?.[1] ?? "22.19.0";
+    } catch { return "22.19.0"; }
+  })();
+  const nodeOk = versionGte(node, piNodeMin);
+  add("required", `Node.js ${piNodeMin}+ for Pi ${minPi}+ (found ${node}${nodeOk ? "" : sourceOf("node")})`, nodeOk, remedy("node"));
   const piVer = which("pi") ? firstLine("pi", ["--version"]).match(/\d+\.\d+\.\d+/)?.[0] : undefined;
-  if (!which("pi")) add(flag("install-pi") ? "optional" : "required", `Pi CLI ${minPi}+${flag("install-pi") ? " (step 1 installs it)" : ""}`, flag("install-pi"), { text: `re-run with --install-pi, or: npm install -g ${manifest.pi.cliPackage}`, cmds: [`npm install -g ${manifest.pi.cliPackage}`] });
+  const piFix = nodeOk
+    ? { text: which("pi") ? "pi update --self" : `re-run with --install-pi, or: npm install -g ${cliPkgName}`, cmds: which("pi") ? ["pi update --self"] : [`npm install -g ${cliPkgName}`] }
+    : { text: `upgrade Node to ${piNodeMin}+ first (on ${node}, npm installs Pi 0.74.x instead of ${minPi}+), then: npm install -g ${cliPkgName}`, cmds: [] };
+  if (!which("pi")) add(flag("install-pi") && nodeOk ? "optional" : "required", `Pi CLI ${minPi}+${flag("install-pi") ? " (step 1 installs it)" : ""}`, flag("install-pi") && nodeOk, piFix);
   else if (!piVer) add("recommended", `Pi CLI ${minPi}+ (version unreadable${sourceOf("pi")})`, false, { text: "run `pi --version` and check that it prints a version", cmds: [] });
-  else add("required", `Pi CLI ${minPi}+ (found ${piVer}${versionGte(piVer, minPi) ? "" : sourceOf("pi")})`, versionGte(piVer, minPi), "pi update --self");
+  else add("required", `Pi CLI ${minPi}+ (found ${piVer}${versionGte(piVer, minPi) ? "" : sourceOf("pi")})`, versionGte(piVer, minPi), piFix);
   // v1 has no `configure sso`, no sso-session profiles and no `bedrock get-use-case-for-model-access`, so step 5 fails
   // on it with errors that say nothing about the CLI version.
   const awsMajor = which("aws") ? Number(firstLine("aws", ["--version"]).match(/aws-cli\/(\d+)/)?.[1] ?? 0) : 0;
@@ -427,10 +439,27 @@ step(1, "preflight");
   if (dangling.length) note("(these pointed at a dotfiles package that no longer exists; real files are written in their place)");
 }
 const nodeMajor = Number(process.versions.node.split(".")[0]);
-note(`node ${process.versions.node}${nodeMajor < manifest.openwiki.minNode ? `  (OpenWiki needs ${manifest.openwiki.minNode}+; pi and bedrouter are fine on 20+)` : ""}`);
+note(`node ${process.versions.node}${nodeMajor < manifest.openwiki.minNode ? `  (OpenWiki needs ${manifest.openwiki.minNode}+)` : ""}`);
 let piBin = which("pi");
+// Prefer the bin dir that owns the `pi` shim (nvm/Homebrew) over a Cursor-injected Node earlier on PATH.
+// Otherwise `npm root -g` and `pi install` (which runs `npm install -g`) write into Cursor's private prefix.
+if (piBin) {
+  const piBinDir = path.dirname(piBin);
+  const pathDirs = (process.env.PATH ?? "").split(path.delimiter);
+  if (pathDirs[0] !== piBinDir) process.env.PATH = [piBinDir, ...pathDirs.filter((d) => d && d !== piBinDir)].join(path.delimiter);
+}
 const cliPkg = manifest.pi.cliPackage;
+const minPiCli = manifest.pi.minCliVersion;
+const piNodeFloor = (() => {
+  try {
+    const eng = JSON.parse(run("npm", ["view", `${cliPkg}@${minPiCli}`, "engines", "--json"], { timeout: 30_000 }).stdout || "{}");
+    return String(eng.node ?? "").match(/>=\s*(\d+\.\d+\.\d+)/)?.[1] ?? "22.19.0";
+  } catch { return "22.19.0"; }
+})();
 if (!piBin && flag("install-pi")) {
+  if (!versionGte(process.versions.node, piNodeFloor)) {
+    fail(`Node ${process.versions.node} is below ${piNodeFloor}, which Pi ${minPiCli}+ requires. npm would install an older Pi (0.74.x) instead. Upgrade Node, then re-run with --install-pi.`);
+  }
   // npm first: on Homebrew/nvm setups its global bin dir is already on PATH. bun/pnpm work too but usually need a PATH line.
   const mgr = opt("pi-manager", ["npm", "bun", "pnpm"].find((m) => which(m)) ?? "npm");
   const cmd = { npm: ["npm", ["install", "-g", cliPkg]], bun: ["bun", ["add", "-g", cliPkg]], pnpm: ["pnpm", ["add", "-g", cliPkg]] }[mgr];
@@ -453,6 +482,10 @@ if (!piBin && flag("install-pi")) {
         note(`pi installed to ${binDir}, which is not on your PATH. Using it for this run; add this to your shell rc:\n         export PATH="${binDir}:$PATH"`);
       } else fail(`${cliPkg} installed but \`pi\` is not on PATH; open a new shell or add your global bin directory to PATH, then re-run`);
     }
+    const installedPi = (run("pi", ["--version"]).stdout || "").match(/\d+\.\d+\.\d+/)?.[0];
+    if (!installedPi || !versionGte(installedPi, minPiCli)) {
+      fail(`npm installed Pi ${installedPi ?? "unknown"}, but this release needs ${minPiCli}+. Node ${process.versions.node} is too old for current Pi (needs ${piNodeFloor}+), so npm picked a legacy build. Upgrade Node, then: npm install -g ${cliPkg}`);
+    }
   }
 }
 if (!piBin && !DRY) fail(`pi is not installed. Re-run with --install-pi, or install it yourself:  npm install -g ${cliPkg}`);
@@ -466,10 +499,17 @@ const settingsPath = path.join(agentDir, "settings.json");
 let settings = readJson(settingsPath, {});
 const installed = new Set(settings.packages ?? []);
 // Everything the manifest asks for, plus anything settings.json already lists (packages you added yourself): after a
-// reinstall the list survives in settings/dotfiles but the code under ~/.pi/agent/npm does not, so honour the list.
+// reinstall the list survives in settings/dotfiles but the code under npm's global root does not, so honour the list.
 const listedRemote = [...installed].filter((p) => /^(npm|git):/.test(p));
 const bareOf = (pkg) => pkg.replace(/^npm:/, "").replace(/@[^@/]+$/, "").replace(/^git:.*\/([^/@]+?)(?:\.git)?(?:@.*)?$/, "$1");
 const pinOf = (pkg) => { if (!pkg.startsWith("npm:")) return undefined; const s = pkg.slice(4), i = s.lastIndexOf("@"); return i > 0 ? s.slice(i + 1) : undefined; };
+// Pi installs user npm packages with `npm install -g` (see `pi` docs/packages.md). Older Pi used ~/.pi/agent/npm.
+const npmGlobalRoot = () => (run("npm", ["root", "-g"]).stdout || "").trim();
+const resolvePiNpmPackage = (bare) => {
+  const root = npmGlobalRoot();
+  const candidates = [root ? path.join(root, bare) : "", path.join(agentDir, "npm", "node_modules", bare)].filter(Boolean);
+  return candidates.find((d) => fs.existsSync(path.join(d, "package.json")));
+};
 // One entry per package name, the manifest first: settings.json still lists the previous release's pin after an
 // update, and installing that entry too would put the old version straight back.
 const byName = new Map();
@@ -480,11 +520,11 @@ for (const p of localPaths) if (!fs.existsSync(path.resolve(agentDir, p))) note(
 for (const pkg of wanted) {
   const bare = bareOf(pkg), pin = pinOf(pkg);
   const listed = [...installed].some((p) => p === pkg || bareOf(p) === bare || p.endsWith(`/${bare}`));
-  const version = () => readJson(path.join(agentDir, "npm", "node_modules", bare, "package.json"), null)?.version;
+  const version = () => { const dir = resolvePiNpmPackage(bare); return dir ? readJson(path.join(dir, "package.json"), null)?.version : undefined; };
   // Fatal, because step 4 renders a config for the release's bedrouter, and an older one cannot read it.
   const checkPin = () => { if (pin && version() !== pin) fail(`${bare} is ${version() ?? "missing"} after pi install; this release pins ${pin}`); };
   // listed in settings.json but absent on disk (e.g. after a reinstall that restored settings): install anyway
-  const onDisk = /^(npm|git):/.test(pkg) ? fs.existsSync(path.join(agentDir, "npm", "node_modules", bare, "package.json")) : true;
+  const onDisk = /^(npm|git):/.test(pkg) ? Boolean(resolvePiNpmPackage(bare)) : true;
   if (listed && onDisk) {
     const before = version();
     if (pin && before !== pin) {
@@ -579,8 +619,17 @@ if (JSON.stringify(pb) !== JSON.stringify(pbNext)) {
   did(`write ${pbPath} (home ${pbNext.home}; migrated away autoSelect)`);
 } else note(`${pbPath} up to date`);
 
-const brPkg = path.join(agentDir, "npm", "node_modules", "bedrouter");
-const brCli = path.join(brPkg, "dist", "cli.js");
+const brCli = (() => {
+  const root = npmGlobalRoot();
+  const piBed = resolvePiNpmPackage("pi-bedrouter");
+  const candidates = [
+    piBed ? path.join(piBed, "node_modules", "bedrouter", "dist", "cli.js") : "",
+    root ? path.join(root, "bedrouter", "dist", "cli.js") : "",
+    path.join(agentDir, "npm", "node_modules", "bedrouter", "dist", "cli.js"),
+    path.join(agentDir, "npm", "node_modules", "pi-bedrouter", "node_modules", "bedrouter", "dist", "cli.js"),
+  ].filter(Boolean);
+  return candidates.find((p) => fs.existsSync(p)) ?? candidates[0];
+})();
 if (!fs.existsSync(brCli) && !DRY) fail(`bedrouter binary not found at ${brCli}; did pi install npm:pi-bedrouter succeed?`);
 const envPath = path.join(brHome, ".env");
 if (!fs.existsSync(envPath)) {

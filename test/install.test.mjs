@@ -21,23 +21,36 @@ function fixture() {
   const agentDir = path.join(home, ".pi", "agent");
   const fakeBin = path.join(dir, "bin");
   const firstmate = path.join(dir, "firstmate");
+  // Match current Pi: user packages land in npm's global node_modules via `npm install -g`.
+  const npmModules = path.join(home, ".npm-global", "lib", "node_modules");
   fs.mkdirSync(agentDir, { recursive: true });
+  fs.mkdirSync(npmModules, { recursive: true });
   fs.mkdirSync(path.join(firstmate, "bin"), { recursive: true });
   fs.writeFileSync(path.join(firstmate, "AGENTS.md"), "# firstmate test manual\n");
   writeExecutable(path.join(fakeBin, "pi"), "#!/bin/sh\n[ \"${1:-}\" = --version ] && echo 'pi test'\nexit 0\n");
+  writeExecutable(path.join(fakeBin, "npm"), `#!/bin/sh
+case "$*" in
+  "root -g") printf '%s\\n' ${JSON.stringify(npmModules)}; exit 0 ;;
+  "prefix -g") printf '%s\\n' ${JSON.stringify(path.join(home, ".npm-global"))}; exit 0 ;;
+  # Satisfy the Pi engines preflight without requiring the host Node to be 22.19+.
+  *"engines"*) printf '%s\\n' '{"node":">=20.0.0"}'; exit 0 ;;
+  *"dist-tags"*) printf '%s\\n' '{"latest":"0.85.0"}'; exit 0 ;;
+esac
+exit 0
+`);
 
   const settings = { packages: manifest.pi.packages, enabledModels: ["openai/test"] };
   fs.writeFileSync(path.join(agentDir, "settings.json"), JSON.stringify(settings, null, 2) + "\n");
   for (const spec of manifest.pi.packages) {
     const [, name, version] = spec.match(/^npm:(.+)@([^@]+)$/);
-    const pkgDir = path.join(agentDir, "npm", "node_modules", name);
+    const pkgDir = path.join(npmModules, name);
     fs.mkdirSync(pkgDir, { recursive: true });
     fs.writeFileSync(path.join(pkgDir, "package.json"), JSON.stringify({ name, version }));
   }
-  const bedrouter = path.join(agentDir, "npm", "node_modules", "bedrouter");
+  const bedrouter = path.join(npmModules, "pi-bedrouter", "node_modules", "bedrouter");
   fs.mkdirSync(path.join(bedrouter, "dist"), { recursive: true });
   fs.writeFileSync(path.join(bedrouter, "dist", "cli.js"), "");
-  return { dir, home, agentDir, fakeBin, firstmate };
+  return { dir, home, agentDir, fakeBin, firstmate, npmModules };
 }
 
 function install(f, extra = []) {
@@ -516,7 +529,7 @@ test("an installed package off its pin is moved to it, one at its pin is left al
   const f = fixture();
   const calls = path.join(f.dir, "pi-calls");
   writeExecutable(path.join(f.fakeBin, "pi"), `#!/bin/sh\n[ "\${1:-}" = --version ] && echo 'pi test'\nprintf '%s\\n' "$*" >> ${JSON.stringify(calls)}\nexit 0\n`);
-  const pkgJson = path.join(f.agentDir, "npm", "node_modules", "pi-bedrouter", "package.json");
+  const pkgJson = path.join(f.npmModules, "pi-bedrouter", "package.json");
 
   install(f);
   assert.ok(!(fs.existsSync(calls) && /^(install|update) /m.test(fs.readFileSync(calls, "utf8"))), "a package at its pin must not be touched");
@@ -537,10 +550,10 @@ test("a required prerequisite stops the install before anything is written", () 
   const r = check("--profile", "bedrouter", "--skip-tools", "--firstmate-dir", f.firstmate);
   assert.equal(r.status, 1);
   assert.match(r.out, /\[ \] AWS CLI v2 \(found v1 at [^)]*\)\s+required/);
-  assert.match(r.out, /1 required prerequisite\(s\) missing/);
+  assert.match(r.out, /\d+ required prerequisite\(s\) missing/);
   assert.equal(fs.existsSync(path.join(f.home, ".hablo")), false, "nothing may be written when a required prerequisite is missing");
 
-  // Without the AWS step, v1 is only advisory.
+  // Without the AWS step, v1 is only advisory (fake npm reports engines this Node satisfies).
   assert.equal(check("check", "--profile", "").status, 0);
 });
 
