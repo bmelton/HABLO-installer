@@ -16,7 +16,7 @@
       "npm:pi-vision-handoff@0.10.4",
       "npm:pi-impeccable@0.1.0",
       "npm:pi-openwiki-adapter@0.7.3",
-      "npm:pi-bedrouter@0.7.0"
+      "npm:pi-bedrouter@0.9.1"
     ],
     "optionalPackages": [],
     "enabledModels": [
