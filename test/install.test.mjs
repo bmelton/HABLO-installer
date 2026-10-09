@@ -536,7 +536,7 @@ test("a required prerequisite stops the install before anything is written", () 
 
   const r = check("--profile", "bedrouter", "--skip-tools", "--firstmate-dir", f.firstmate);
   assert.equal(r.status, 1);
-  assert.match(r.out, /\[ \] AWS CLI v2 \(found v1\)\s+required/);
+  assert.match(r.out, /\[ \] AWS CLI v2 \(found v1 at [^)]*\)\s+required/);
   assert.match(r.out, /1 required prerequisite\(s\) missing/);
   assert.equal(fs.existsSync(path.join(f.home, ".hablo")), false, "nothing may be written when a required prerequisite is missing");
 
@@ -575,4 +575,28 @@ test("update plans the move to the newest release tag and refuses a dirty checko
 
   g(work, "checkout", "--quiet", "v0.2.0");
   assert.match(update("--check").out, /up to date: v0\.2\.0/);
+});
+
+test("on apt, the fix block batches safe packages and sends AWS CLI and Go elsewhere", () => {
+  const f = fixture();
+  // Only node and which besides the fakes, so git, curl, tmux and jq are all missing whatever the host has.
+  fs.symlinkSync(process.execPath, path.join(f.fakeBin, "node"));
+  fs.symlinkSync(execFileSync("/bin/sh", ["-c", "command -v which"], { encoding: "utf8" }).trim(), path.join(f.fakeBin, "which"));
+  writeExecutable(path.join(f.fakeBin, "aws"), "#!/bin/sh\necho 'aws-cli/1.22.34 Python/3.10'\n");
+  writeExecutable(path.join(f.fakeBin, "go"), "#!/bin/sh\necho 'go version go1.19.8 linux/amd64'\n");
+  let out;
+  try {
+    out = execFileSync(process.execPath, [path.join(root, "install.mjs"), "check", "--profile", "bedrouter", "--skip-tools"], {
+      encoding: "utf8",
+      env: { HOME: f.home, PI_CODING_AGENT_DIR: f.agentDir, PATH: f.fakeBin, HABLO_PLATFORM: "linux/apt", NO_COLOR: "1" },
+    });
+  } catch (e) { out = `${e.stdout}${e.stderr}`; }
+  const block = out.slice(out.indexOf("To fix, run these in order"));
+  // curl is skipped as a tool here (--skip-tools), so it and unzip arrive only because the AWS CLI fix runs them.
+  assert.match(block, /^ {4}sudo apt install -y (?=.*\bgit\b)(?=.*\btmux\b)(?=.*\bjq\b)(?=.*\bcurl\b)(?=.*\bunzip\b).*$/m, "safe packages go in one apt line");
+  assert.doesNotMatch(block, /apt install -y .*\b(awscli|golang-go|nodejs)\b/, "apt must never be offered for AWS CLI, Go, or Node");
+  assert.match(out, /AWS CLI v2 \(found v1 at .*\)\s+required\n\s+fix: not the apt package \(apt and dnf ship AWS CLI v1/);
+  assert.match(block, /awscli-exe-linux-\$\(uname -m\)\.zip/);
+  assert.match(out, /Go 1\.22\+ .*\(found 1\.19\.8 at .*\)/);
+  assert.match(block, /go\.dev\/doc\/install/);
 });
