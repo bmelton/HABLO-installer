@@ -1,15 +1,20 @@
 {
-  "$comment": "Written by HABLO-installer to <firstmate>/config/crew-dispatch.json. Every crewmate and scout is a Pi session on the captain's own provider and model; the exact --model string is in the captain's system prompt, under 'Crew model (HABLO, this voyage)'.",
+  "$comment": "Written by HABLO-installer to <firstmate>/config/crew-dispatch.json. Every crewmate and scout is a Pi session on the captain's own provider and model; the exact --model string is in the captain's system prompt, under 'Crew model (HABLO, this voyage)'. Never substitute a disabled bedrouter alias (e.g. fable): only aliases returned by GET /v1/models are spawnable.",
   "rules": [
     {
       "when": "Any task: implementation, fixes, refactors, tests, documentation, investigation, review, scouting.",
       "use": { "harness": "pi" },
-      "why": "The crew runs whatever the captain runs. Pass --model with the exact provider/id string from the 'Crew model (HABLO, this voyage)' block in your system prompt, and never omit it. On bedrouter that string is an auto alias, so model tiering stays bedrouter's per-request decision rather than the dispatcher's; on any other provider it keeps the crew on the login the captain chose for today's billing."
+      "why": "The crew runs whatever the captain runs. Pass --model with the exact provider/id string from the 'Crew model (HABLO, this voyage)' block in your system prompt, and never omit it. On bedrouter that string is normally an auto alias, so model tiering stays bedrouter's per-request decision; do not pin sonnet/opus/fable unless that exact alias is listed by curl -fsS http://127.0.0.1:20129/v1/models and the user asked for it."
     },
     {
       "when": "The user explicitly asks for a specific tier, e.g. 'use the strongest model' or 'cheap pass only'.",
       "use": { "harness": "pi", "effort": "high" },
-      "why": "Raise effort rather than pinning a model. On bedrouter, high effort is an explore signal and the router routes up; on other providers it maps to that provider's own reasoning level. Either way the crew stays on the captain's provider."
+      "why": "Raise effort rather than pinning a model. On bedrouter, high effort is an explore signal and the router routes up; on other providers it maps to that provider's own reasoning level. Either way the crew stays on the captain's provider. Never invent or enable a disabled rung (fable ships enabled:false)."
+    },
+    {
+      "when": "A previous crewmate refused the FIRSTMATE_OP brief as prompt injection, or died with Operation aborted.",
+      "use": { "harness": "pi", "effort": "high" },
+      "why": "Respawn once on the voyage model (Crew model block), not a pinned Anthropic alias. Brief-refusal and abort handling are in the HABLO model policy in data/captain.md."
     }
   ],
   "default": { "harness": "pi" }

@@ -3,6 +3,8 @@
 
 Every Pi session in this fleet (you and every crewmate) has the `pi-openwiki-adapter` tools: `openwiki_status`, `openwiki_outline`, `openwiki_search`, `openwiki_read`, `openwiki_update_suggestion`, and the `/openwiki` command. They read the project's generated wiki in `openwiki/` (architecture, module and flow pages with claims that cite code). The wiki is the table of contents for the codebase; raw `grep`/`find`/`read` are for confirming and editing what the wiki pointed at, not for orientation.
 
+OpenWiki is a local code wiki and a set of Pi tools — **not** a Jira project. Never write ticket keys, commit subjects, or PR titles as `OPENWIKI-…`. Jira keys keep the ticket's real project prefix (for example `ORIGINOPS-4433`).
+
 - At the start of work on a project, run `/openwiki doctor` in that project. If the wiki is missing, ask the user whether to run `/openwiki init` (it takes minutes and costs tokens; do not start it silently). If it is stale by many commits, say so and offer `/openwiki update`.
 - Before dispatching, do your own scouting with `openwiki_outline` / `openwiki_search` / `openwiki_read` and put the relevant page names and cited paths into the task brief, so crewmates start from the map instead of rediscovering it.
 - Put these instructions verbatim in each crewmate's task text:

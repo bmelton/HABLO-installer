@@ -90,13 +90,30 @@ function runInstalledHablo(f, args = [], env = {}) {
   if (!fs.existsSync(path.join(project, ".git"))) execFileSync("git", ["init", "--quiet", project]);
   const calls = path.join(f.dir, "pi-call.json");
   fs.rmSync(calls, { force: true });
-  writeExecutable(path.join(f.fakeBin, "pi"), `#!/bin/sh\nprintf '%s\\n' "$HABLO_CREW_MODEL" > ${JSON.stringify(calls)}\nprintf '%s\\n' "$@" >> ${JSON.stringify(calls)}\nprintf 'HABLO_PI_EXTENSIONS=%s\\n' "$HABLO_PI_EXTENSIONS" >> ${JSON.stringify(calls)}\n`);
+  writeExecutable(
+    path.join(f.fakeBin, "pi"),
+    `#!/bin/sh
+[ "\${1:-}" = --version ] && { echo 1.1.0; exit 0; }
+printf '%s\\n' "$HABLO_CREW_MODEL" > ${JSON.stringify(calls)}
+printf '%s\\n' "$@" >> ${JSON.stringify(calls)}
+printf 'HABLO_PI_EXTENSIONS=%s\\n' "$HABLO_PI_EXTENSIONS" >> ${JSON.stringify(calls)}
+`,
+  );
+  // hablo's runtime picker only needs `node -v` / `pi --version` from PATH.
+  writeExecutable(path.join(f.fakeBin, "node"), "#!/bin/sh\n[ \"${1:-}\" = -v ] && { echo v22.19.0; exit 0; }\nexit 0\n");
   try {
     const stderr = execFileSync(path.join(f.home, ".local", "bin", "hablo"), args, {
       cwd: project,
       encoding: "utf8",
       stdio: ["ignore", "pipe", "pipe"],
-      env: { ...process.env, HOME: f.home, PI_CODING_AGENT_DIR: f.agentDir, PATH: `${f.fakeBin}:${process.env.PATH}`, ...env },
+      env: {
+        ...process.env,
+        HOME: f.home,
+        PI_CODING_AGENT_DIR: f.agentDir,
+        PATH: `${f.fakeBin}:${process.env.PATH}`,
+        HABLO_PREFLIGHT: "skip", // unit tests do not run a live bedrouter/SSO gate
+        ...env,
+      },
     });
     return { status: 0, stdout: stderr, stderr: "", call: fs.readFileSync(calls, "utf8") };
   } catch (error) {
@@ -113,8 +130,22 @@ test("Wave 0 installs and disables tone policy while appending receipt runs", ()
     assert.match(captain, /HABLO:BRANCH-POLICY:START/);
     assert.match(captain, /HABLO:OPENWIKI-POLICY:START/);
     assert.match(captain, /HABLO:TICKET-POLICY:START/);
+    assert.match(captain, /HABLO:MODEL-POLICY:START/);
+    assert.match(captain, /no `--project` flag/);
+    assert.match(captain, /fm-brief\.sh <task-id> <repo-name>/);
+    assert.match(captain, /Jira key is an exact string/);
+    assert.match(captain, /not\*\* a Jira project/);
+    assert.match(captain, /config\/brief-include\.md/);
+    const briefInclude = fs.readFileSync(path.join(f.firstmate, "config", "brief-include.md"), "utf8");
+    assert.match(briefInclude, /HABLO:BRIEF-INCLUDE:START/);
+    assert.match(briefInclude, /hablo-jira transition --key <JIRA-KEY> --to in-review/);
+    assert.doesNotMatch(briefInclude, /Delivery contract: mode=/);
     assert.match(fs.readFileSync(path.join(f.home, ".hablo", "tone.md"), "utf8"), /HABLO:TONE-RULE:START/);
     assert.ok(fs.existsSync(path.join(f.agentDir, "extensions", "hablo-tone.ts")));
+    assert.ok(fs.existsSync(path.join(f.agentDir, "extensions", "hablo-crewmate.ts")));
+    assert.ok(fs.existsSync(path.join(f.home, ".local", "bin", "hablo-preflight")));
+    assert.ok(fs.existsSync(path.join(f.home, ".local", "bin", "hablo-fleet-reset")));
+    assert.ok(fs.existsSync(path.join(f.home, ".hablo", "hablo-preflight")));
     assert.ok(fs.existsSync(path.join(f.home, ".local", "bin", "hablo-jira")), installOutput);
     assert.ok(fs.existsSync(path.join(f.home, ".local", "bin", "hablo-jira-agent")), installOutput);
     assert.ok(fs.existsSync(path.join(f.home, ".local", "bin", "hablo-dream")), installOutput);

@@ -15,7 +15,7 @@ Include this lookup rule in every relevant crewmate brief.
 
 ### Reporting
 
-Keep the Jira ticket current throughout a ticket workflow. Include this duty verbatim in every relevant crewmate brief; each crewmate reports its own stage and a reporting failure never stops delivery.
+Keep the Jira ticket current throughout a ticket workflow. HABLO also installs this duty into `config/brief-include.md`, so `fm-brief.sh` appends it to every ship/scout brief as `# Home brief additions` without relying on you to paste it. Still name the exact `<JIRA-KEY>` in Captain's intent; each crewmate reports its own stage and a reporting failure never stops delivery.
 
 - Triage: `hablo-jira comment --key <JIRA-KEY> --stage triage --body @<refined-ticket-file> --quiet`
 - Ready for work: `hablo-jira transition --key <JIRA-KEY> --to in-progress --quiet`

@@ -11,7 +11,7 @@
 //                    (profile defaults to hablo.json; AWS_PROFILE in the environment also counts)
 //                    [--skip-aws] [--skip-probe] [--skip-agents] [--force-agents] [--home <dir>]
 //                    [--skip-firstmate] [--no-firstmate-pull] [--firstmate-dir <dir>] [--backend tmux|herdr] [--no-branch-policy] [--base-branch <name>]
-//                    [--no-openwiki-policy] [--nautical|--no-tone-policy]
+//                    [--no-openwiki-policy] [--no-model-policy] [--nautical|--no-tone-policy]
 //                    [--skip-cli] [--bin-dir <dir>] [--cli-model <m>]   the `hablo` command (default ~/.local/bin) and its Pi extension
 //                    [--skip-tools] [--update-tools]   firstmate's tool dependencies (treehouse, no-mistakes, *-axi)
 //                    [--update-packages]   pi update the installed Pi packages that hablo.json does not pin
@@ -35,7 +35,7 @@
 //   8 fit notes   pi-agents model notes into ~/.pi/agent/workflows.json
 //   9 firstmate   clone/update kunchenguid/firstmate; crew harness = pi; crew-dispatch.json routing every crewmate
 //                 through bedrouter; captain.md branch, OpenWiki, and plain-language policies; optional config/backend
-//  10 cli         `hablo`: launch a firstmate captain from any project directory (wrapper + captain/tone extensions)
+//  10 cli         `hablo` + hablo-preflight + hablo-fleet-reset; captain/crewmate/tone Pi extensions
 //  11 tools       firstmate's tool dependencies: npm -g gh-axi chrome-devtools-axi lavish-axi tasks-axi quota-axi;
 //                 treehouse and no-mistakes via their install scripts into ~/.local/bin (no sudo)
 //  13 jira        build the reporting CLI and dispatch agent, render config, install and start the user scheduler
@@ -916,6 +916,43 @@ else {
     else removeCaptainBlock("TICKET-POLICY", "Jira reporting policy");
     if (toneEnabled) captainBlock("TONE-POLICY", fs.readFileSync(path.join(here, fm.tonePolicy), "utf8").trim() + "\n", "plain talk policy");
     else removeCaptainBlock("TONE-POLICY", "plain talk policy");
+    // Model allowlist + FIRSTMATE_OP refusal + Operation aborted: written even when tone/jira are off.
+    if (fm.modelPolicy && !flag("no-model-policy")) {
+      captainBlock("MODEL-POLICY", fs.readFileSync(path.join(here, fm.modelPolicy), "utf8").trim() + "\n", "bedrouter model allowlist and brief-refusal / abort policy");
+    } else removeCaptainBlock("MODEL-POLICY", "bedrouter model allowlist and brief-refusal / abort policy");
+
+    // firstmate's optional config/brief-include.md is appended verbatim to every ship/scout
+    // brief as "# Home brief additions". HABLO owns a marked block so crewmates get Jira
+    // reporting without the captain pasting captain.md into each brief.
+    if (fm.briefInclude) {
+      const includePath = path.join(fmDir, "config", "brief-include.md");
+      const includeText = fs.readFileSync(path.join(here, fm.briefInclude), "utf8").trim() + "\n";
+      const includeBlock = /<!-- HABLO:BRIEF-INCLUDE:START -->[\s\S]*?<!-- HABLO:BRIEF-INCLUDE:END -->\n?/;
+      const wantInclude = !flag("no-tracker") && !flag("skip-jira");
+      const curInclude = fs.existsSync(includePath) ? fs.readFileSync(includePath, "utf8") : "";
+      if (wantInclude) {
+        if (curInclude && !includeBlock.test(curInclude) && !/HABLO-installer|HABLO:BRIEF-INCLUDE/.test(curInclude)) {
+          note(`${path.relative(home, includePath)} exists without HABLO markers; leaving it (delete it or add HABLO:BRIEF-INCLUDE markers to adopt)`);
+        } else {
+          const nextInclude = includeBlock.test(curInclude) ? curInclude.replace(includeBlock, includeText) : (curInclude ? curInclude.replace(/\s*$/, "\n\n") + includeText : includeText);
+          if (nextInclude !== curInclude) {
+            writeText(includePath, nextInclude, { record: false });
+            record({ kind: curInclude ? "block.update" : "block.insert", path: homePath(includePath), marker: "HABLO:BRIEF-INCLUDE", fileCreated: !curInclude, sha256: sha256(nextInclude), blockSha256: sha256(includeText) });
+            did(`${curInclude ? "update" : "write"} ${path.relative(home, includePath)}: Jira reporting for every ship/scout brief`);
+          } else note("brief-include.md Jira reporting up to date");
+        }
+      } else if (includeBlock.test(curInclude)) {
+        const nextInclude = curInclude.replace(includeBlock, "").replace(/\n{3,}/g, "\n\n").trim();
+        if (nextInclude) {
+          writeText(includePath, nextInclude + "\n", { record: false });
+          record({ kind: "block.remove", path: homePath(includePath), marker: "HABLO:BRIEF-INCLUDE", sha256: sha256(nextInclude + "\n") });
+        } else if (fs.existsSync(includePath)) {
+          fs.unlinkSync(includePath);
+          record({ kind: "file.remove", path: homePath(includePath), marker: "HABLO:BRIEF-INCLUDE" });
+        }
+        did(`remove ${path.relative(home, includePath)}: Jira reporting brief include`);
+      }
+    }
   }
 }
 
@@ -938,9 +975,16 @@ else {
     did(`${cur === null ? "install" : "update"} ${path.relative(home, dst)}`);
   };
   const cliModel = opt("cli-model", cli.model ?? "auto");
-  installFile(path.join(here, "bin", "hablo"), path.join(binDir, "hablo"), (t) => t.replace(/__FM_ROOT__/g, fmDir).replace(/__HABLO_INSTALLER__/g, here).replace(/__HABLO_HOME__/g, habloHome).replace(/__PROVIDER__/g, cli.provider).replace(/__MODEL__/g, cliModel), 0o755);
+  const stampHablo = (t) => t.replace(/__FM_ROOT__/g, fmDir).replace(/__HABLO_INSTALLER__/g, here).replace(/__HABLO_HOME__/g, habloHome).replace(/__PROVIDER__/g, cli.provider).replace(/__MODEL__/g, cliModel);
+  installFile(path.join(here, "bin", "hablo"), path.join(binDir, "hablo"), stampHablo, 0o755);
   note(`hablo defaults to --provider ${cli.provider} --model ${cliModel} (HABLO_PROVIDER / HABLO_MODEL or your own flags override)`);
+  // Preflight + fleet reset: stamped copies under ~/.hablo and ~/.local/bin (hablo looks in HABLO_HOME first).
+  installFile(path.join(here, "bin", "hablo-preflight"), path.join(habloHome, "hablo-preflight"), (t) => t, 0o755);
+  installFile(path.join(here, "bin", "hablo-preflight"), path.join(binDir, "hablo-preflight"), (t) => t, 0o755);
+  installFile(path.join(here, "bin", "hablo-fleet-reset"), path.join(binDir, "hablo-fleet-reset"), (t) => t, 0o755);
   installFile(path.join(here, "pi", "extensions", "hablo-captain.ts"), path.join(habloHome, "hablo-captain.ts"), (t) => t, 0o644);
+  // Global crewmate extension: crewmates launch as `pi -e <task.pi-ext.ts>` and skip the hablo wrapper, so this must live under ~/.pi/agent/extensions/.
+  installFile(path.join(here, "pi", "extensions", "hablo-crewmate.ts"), path.join(agentDir, "extensions", "hablo-crewmate.ts"), (t) => t, 0o644);
   const tonePath = path.join(habloHome, "tone.md");
   if (toneEnabled) {
     const source = fs.readFileSync(path.join(here, fm.tonePolicy), "utf8");

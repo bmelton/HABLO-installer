@@ -4,10 +4,12 @@
 Development happens on feature branches named after the Jira ticket, cut from and merged back into `__BASE__`. Nothing targets the repository's default branch directly; promoting `__BASE__` to the default branch is a release step done by humans.
 
 - Every task must name a Jira key (for example `PROJ-123`). If the request has none, ask for it before dispatching; do not guess.
+- The Jira key is an exact string. Copy it character-for-character from the user request or `hablo-jira` / jira-agent brief (for example `ORIGINOPS-4433`). Never invent a key, never change the project prefix, and never substitute tool or product names (OpenWiki, HABLO, firstmate, etc.) for the Jira project.
+- Use that same key everywhere for the task: `--base-branch`, `## Captain's intent` (leading `KEY:` line), crewmate commit messages, PR titles, and `hablo-jira` calls. Before `fm-spawn.sh`, confirm the brief's intent key matches `Base branch:` / `--base-branch`. If they differ, fix the brief; do not spawn.
 - The integration branch for a task is `<JIRA-KEY>` on `origin`, cut from `origin/__BASE__`. Before dispatching, make sure it exists: `git fetch origin && (git rev-parse --verify -q origin/<JIRA-KEY> || git push origin origin/__BASE__:refs/heads/<JIRA-KEY>)`. If `origin/__BASE__` itself does not exist, stop and ask the user rather than falling back to the default branch.
 - Put these instructions verbatim in each crewmate's task text:
   1. After `git checkout -b fm/<id>`, run `git fetch origin <JIRA-KEY> && git reset --hard origin/<JIRA-KEY>` so the work starts from the ticket branch, not the default branch.
-  2. Commit as usual on `fm/<id>`. Commit messages and the PR title start with `<JIRA-KEY>:`.
+  2. Commit as usual on `fm/<id>`. Commit messages and the PR title start with `<JIRA-KEY>:` using the exact key from this brief (the same key as `Base branch:`), never a renamed or guessed prefix.
   3. When opening the PR, target the ticket branch: `gh pr create --base <JIRA-KEY> --head fm/<id> ...`. Never open a PR against `__BASE__` or the default branch.
 - When several crewmates work one ticket, they all target `<JIRA-KEY>`; when the ticket is done open the team's normal PR from `<JIRA-KEY>` into `__BASE__` (`gh pr create --base __BASE__ --head <JIRA-KEY> ...`), never into the default branch.
 - `local-only` delivery mode merges into the local default branch and is therefore not allowed under this policy; use `direct-PR` or the no-mistakes pipeline.

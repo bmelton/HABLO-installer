@@ -84,6 +84,12 @@ export default function (pi: ExtensionAPI) {
       // Absolute, like everything else: this block is hardcoded here and never passes through the AGENTS.md rewrite.
       `That is the provider and model this captain is running, in Pi's \`provider/id\` form. \`${root}/config/crew-dispatch.json\` names the harness; this line names the model, and it is authoritative for this voyage. Do not substitute another model, and do not omit the flag: \`${root}/bin/fm-spawn.sh\` passes \`--model\` through only when you give it, and a crewmate launched without one falls back to Pi's default provider, which may not be this one.`,
       "",
+      "On bedrouter, only aliases listed by \`curl -fsS http://127.0.0.1:20129/v1/models\` are spawnable. Disabled stack rungs (for example \`fable\`) are absent from that list and 404 immediately — never pass them to \`fm-spawn.sh\`. Prefer this voyage model; raise \`--effort high\` instead of pinning sonnet/opus.",
+      "",
+      `\`${root}/bin/fm-brief.sh\` and \`${root}/bin/fm-spawn.sh\` take \`<task-id> <repo-name>\` as positionals. There is no \`--project\` flag on either; a leading \`--project\` becomes the task id and scaffolds \`state/--project.status\`, which the watcher never reads. Example: \`bin/fm-brief.sh originops-4433-ui originops --mode direct-PR --base-branch ORIGINOPS-4433\`. Before spawn, confirm the brief's status path is \`state/<task-id>.status\`.`,
+      "",
+      "Jira keys are exact. Copy the ticket key from the user or jira-agent brief into `--base-branch`, Captain's intent, commits, and PR titles — never invent `OPENWIKI-…` or any other renamed prefix. OpenWiki is a wiki tool, not a Jira project. Before spawn, the brief's intent key must match `Base branch:`.",
+      "",
       "---",
       "",
     ] : []),

@@ -1,0 +1,117 @@
+#!/usr/bin/env bash
+# hablo-preflight: gate a firstmate voyage on live bedrouter/SSO and model allowlist.
+# managed by HABLO-installer (re-running the installer refreshes this copy).
+#
+#   hablo-preflight [--provider <p>] [--model <id|provider/id>] [--soft]
+#
+# Exit codes:
+#   0  ready
+#   1  hard failure (SSO / bedrouter down / unknown or disabled model)
+#   2  soft warning only (--soft, or HABLO_PREFLIGHT=soft)
+#
+# Env:
+#   HABLO_PREFLIGHT=skip   no checks (exit 0)
+#   HABLO_PREFLIGHT=soft   treat failures as warnings (exit 2)
+#   BEDROUTER_URL          default http://127.0.0.1:20129
+set -eu
+
+PROVIDER=""
+MODEL=""
+SOFT=0
+case "${HABLO_PREFLIGHT:-}" in
+  skip|off|0) exit 0 ;;
+  soft|warn) SOFT=1 ;;
+esac
+
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --provider) PROVIDER="${2:-}"; shift 2 ;;
+    --provider=*) PROVIDER="${1#--provider=}"; shift ;;
+    --model) MODEL="${2:-}"; shift 2 ;;
+    --model=*) MODEL="${1#--model=}"; shift ;;
+    --soft) SOFT=1; shift ;;
+    -h|--help)
+      sed -n '2,16p' "$0" | sed 's/^# \{0,1\}//'
+      exit 0
+      ;;
+    *) echo "hablo-preflight: unknown arg: $1" >&2; exit 1 ;;
+  esac
+done
+
+fail() {
+  echo "hablo-preflight: $*" >&2
+  if [ "$SOFT" = 1 ]; then exit 2; fi
+  exit 1
+}
+note() { echo "hablo-preflight: $*" >&2; }
+
+case "$MODEL" in
+  */*)
+    PROVIDER="${PROVIDER:-${MODEL%%/*}}"
+    MODEL_ID="${MODEL#*/}"
+    ;;
+  *)
+    MODEL_ID="$MODEL"
+    ;;
+esac
+PROVIDER="${PROVIDER:-bedrouter}"
+
+if [ "$PROVIDER" != bedrouter ]; then
+  note "provider=$PROVIDER (skipping bedrouter SSO/model checks)"
+  exit 0
+fi
+
+BASE="${BEDROUTER_URL:-http://127.0.0.1:20129}"
+health="$(curl -fsS --max-time 2 "$BASE/health" 2>/dev/null || true)"
+if [ -z "$health" ]; then
+  fail "bedrouter is not reachable at $BASE/health (start it: pi session with pi-bedrouter, or bedrouter serve)"
+fi
+
+# Live model list is the source of truth for enabled aliases (disabled rungs like fable are absent).
+models_json="$(curl -fsS --max-time 3 "$BASE/v1/models" 2>/dev/null || true)"
+[ -n "$models_json" ] || fail "bedrouter /v1/models returned empty (is routing up?)"
+
+if [ -n "$MODEL_ID" ]; then
+  ok="$(MODEL_ID="$MODEL_ID" models_json="$models_json" node -e '
+const j=JSON.parse(process.env.models_json);
+const id=process.env.MODEL_ID;
+const ids=new Set((j.data||j.models||[]).map(m => String(m.id||m.name||"").replace(/^bedrouter\//,"")));
+process.exit(ids.has(id) ? 0 : 1);
+' 2>/dev/null && echo yes || echo no)"
+  if [ "$ok" != yes ]; then
+    avail="$(models_json="$models_json" node -e '
+const j=JSON.parse(process.env.models_json);
+const ids=(j.data||j.models||[]).map(m => String(m.id||m.name||"").replace(/^bedrouter\//,"")).filter(Boolean);
+process.stdout.write(ids.join(", "));
+' 2>/dev/null || true)"
+    fail "model '$MODEL_ID' is not served by bedrouter (enabled aliases: ${avail:-none}). Disabled stack entries (e.g. fable) are not spawnable."
+  fi
+fi
+
+# SSO / credentials: one cheap Converse-shaped probe via doctor when available, else aws sts.
+env_file="${HOME}/.bedrouter/.env"
+profile=""
+if [ -f "$env_file" ]; then
+  profile="$(grep -E '^[[:space:]]*AWS_PROFILE=' "$env_file" | head -1 | cut -d= -f2- | tr -d "\"' ")"
+fi
+profile="${AWS_PROFILE:-$profile}"
+
+if command -v aws >/dev/null 2>&1; then
+  if [ -n "$profile" ]; then
+    sts_ok=0
+    AWS_PROFILE="$profile" aws sts get-caller-identity --output text >/dev/null 2>&1 && sts_ok=1
+  else
+    sts_ok=0
+    aws sts get-caller-identity --output text >/dev/null 2>&1 && sts_ok=1
+  fi
+  if [ "$sts_ok" != 1 ]; then
+    hint="aws sso login"
+    [ -n "$profile" ] && hint="aws sso login --profile $profile"
+    fail "AWS credentials are missing or expired${profile:+ (profile $profile)}. Run: $hint"
+  fi
+else
+  note "aws CLI not on PATH; skipped STS check (bedrouter calls will fail loudly if SSO is dead)"
+fi
+
+note "ok provider=bedrouter model=${MODEL_ID:-'(unset)'} health=up"
+exit 0

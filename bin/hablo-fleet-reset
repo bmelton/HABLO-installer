@@ -1,0 +1,122 @@
+#!/usr/bin/env bash
+# hablo-fleet-reset: clear dead firstmate residue and re-arm supervision continuity.
+# managed by HABLO-installer (re-running the installer refreshes this copy).
+#
+#   hablo-fleet-reset [--dry-run] [--force]
+#
+# Safe default: tears down tasks that already have a .dead-reported-* marker,
+# clears stale watcher-down / beacon markers when no live watcher remains, and
+# prints how the next `hablo` session re-arms fm-watch.
+#
+# Does NOT kill a live fm-watch or a live crewmate without --force.
+set -eu
+
+FM_ROOT="${FM_ROOT:-${FM_HOME:-$HOME/firstmate}}"
+DRY=0
+FORCE=0
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --dry-run) DRY=1; shift ;;
+    --force) FORCE=1; shift ;;
+    -h|--help)
+      sed -n '2,14p' "$0" | sed 's/^# \{0,1\}//'
+      exit 0
+      ;;
+    *) echo "hablo-fleet-reset: unknown arg: $1" >&2; exit 1 ;;
+  esac
+done
+
+[ -d "$FM_ROOT/state" ] || { echo "hablo-fleet-reset: no firstmate state at $FM_ROOT/state" >&2; exit 1; }
+STATE="$FM_ROOT/state"
+export FM_ROOT_OVERRIDE="${FM_ROOT_OVERRIDE:-$FM_ROOT}"
+export FM_HOME="${FM_HOME:-$FM_ROOT}"
+export PATH="$FM_ROOT/bin:$PATH"
+
+run() {
+  if [ "$DRY" = 1 ]; then echo "+ $*" >&2; return 0; fi
+  "$@"
+}
+
+echo "hablo-fleet-reset: home=$FM_ROOT" >&2
+
+# Teardown dead-reported tasks that still have metas.
+for marker in "$STATE"/.dead-reported-*; do
+  [ -e "$marker" ] || continue
+  label="${marker##*/.dead-reported-}"
+  # Markers look like firstmate_fm-ORIGINOPS-4295 or similar; recover task id after fm-
+  id="${label#*_fm-}"
+  id="${id#fm-}"
+  meta="$STATE/$id.meta"
+  if [ ! -f "$meta" ]; then
+    echo "hablo-fleet-reset: $id already has no meta (marker $marker)" >&2
+    continue
+  fi
+  if [ -x "$FM_ROOT/bin/fm-teardown.sh" ]; then
+    echo "hablo-fleet-reset: teardown $id (dead-reported)" >&2
+    if [ "$FORCE" = 1 ]; then
+      run "$FM_ROOT/bin/fm-teardown.sh" "$id" --force || echo "hablo-fleet-reset: teardown $id failed (continuing)" >&2
+    else
+      run "$FM_ROOT/bin/fm-teardown.sh" "$id" || echo "hablo-fleet-reset: teardown $id failed (try --force)" >&2
+    fi
+  else
+    echo "hablo-fleet-reset: fm-teardown.sh missing; leave meta for $id" >&2
+  fi
+done
+
+# Watcher continuity: only clear downtime markers when no fm-watch is alive.
+watch_alive=0
+if [ -f "$STATE/.watcher-lock" ] || pgrep -f "$FM_ROOT/bin/fm-watch.sh" >/dev/null 2>&1; then
+  watch_alive=1
+fi
+
+if [ "$watch_alive" = 1 ] && [ "$FORCE" != 1 ]; then
+  echo "hablo-fleet-reset: fm-watch appears alive; leaving watcher-down markers (pass --force to clear)" >&2
+else
+  for f in .watcher-down .guard-watcher-stale-banner .last-watcher-beat; do
+    if [ -e "$STATE/$f" ]; then
+      echo "hablo-fleet-reset: clear $f" >&2
+      if [ "$DRY" = 1 ]; then echo "+ rm $STATE/$f" >&2
+      else rm -f "$STATE/$f"
+      fi
+    fi
+  done
+  # Stale / dead pane markers for already-torn-down tasks
+  for f in "$STATE"/.stale-* "$STATE"/.stale-since-* "$STATE"/.dead-reported-*; do
+    [ -e "$f" ] || continue
+    base="${f##*/}"
+    # Keep markers only when a meta still exists for that id
+    case "$base" in
+      .stale-firstmate_fm-*|.stale-since-firstmate_fm-*|.dead-reported-firstmate_fm-*)
+        id="${base#*_fm-}"
+        id="${id#fm-}"
+        id="${id#.stale-since-}"
+        ;;
+      *) continue ;;
+    esac
+    if [ ! -f "$STATE/$id.meta" ]; then
+      echo "hablo-fleet-reset: clear orphan $base" >&2
+      if [ "$DRY" = 1 ]; then echo "+ rm $f" >&2
+      else rm -f "$f"
+      fi
+    fi
+  done
+fi
+
+# Teardown can re-print watcher-down warnings; clear once more after the dust settles.
+if [ "$watch_alive" != 1 ] || [ "$FORCE" = 1 ]; then
+  for f in .watcher-down .guard-watcher-stale-banner; do
+    if [ -e "$STATE/$f" ]; then
+      echo "hablo-fleet-reset: re-clear $f after teardown" >&2
+      if [ "$DRY" = 1 ]; then echo "+ rm $STATE/$f" >&2
+      else rm -f "$STATE/$f"
+      fi
+    fi
+  done
+fi
+
+if [ -s "$STATE/.wake-queue" ] && [ -x "$FM_ROOT/bin/fm-wake-drain.sh" ]; then
+  echo "hablo-fleet-reset: note: wake queue is non-empty; drain with: $FM_ROOT/bin/fm-wake-drain.sh" >&2
+fi
+
+echo "hablo-fleet-reset: next captain session (hablo) re-arms fm-watch via fm-primary-pi-watch / fm_watch_arm_pi" >&2
+echo "hablo-fleet-reset: done" >&2

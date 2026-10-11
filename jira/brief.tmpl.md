@@ -5,6 +5,8 @@ Work Jira ticket {{.Key}}.
 **Repository:** {{.Dir}} · **Base branch:** {{.BaseBranch}}
 **Delivery contract:** mode={{.Mode}}
 
+**Authoritative Jira key:** `{{.Key}}` — use this exact string for `--base-branch`, the crewmate brief's `## Captain's intent` leading `KEY:` line, commit subjects, PR titles, and `hablo-jira` calls. Do not rename the project prefix (OpenWiki is a wiki tool, not a Jira project).
+
 ## Description
 
 {{.Description}}

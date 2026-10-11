@@ -32,7 +32,9 @@ usage() {
   sed -n '2,19p' "$0" | sed 's/^# \{0,1\}//'
   echo
   echo "env: FM_ROOT (firstmate checkout), FM_HOME (firstmate home, default FM_ROOT), HABLO_PROJECT_MODE (default direct-PR),"
-  echo "     HABLO_PROVIDER / HABLO_MODEL (default $PROVIDER / $MODEL)"
+  echo "     HABLO_PROVIDER / HABLO_MODEL (default $PROVIDER / $MODEL),"
+  echo "     HABLO_PI (absolute pi binary), HABLO_MIN_PI_VERSION / HABLO_MIN_NODE_VERSION (runtime floor),"
+  echo "     HABLO_PREFLIGHT=skip|soft (SSO/model gate)"
 }
 case "${1:-}" in
   -h|--help|help) usage; exit 0;;
@@ -42,7 +44,106 @@ esac
 
 [ -d "$FM_ROOT/bin" ] || { echo "hablo: firstmate checkout not found at $FM_ROOT (run the HABLO installer, or set FM_ROOT)" >&2; exit 1; }
 [ -f "$HABLO_HOME/hablo-captain.ts" ] || { echo "hablo: $HABLO_HOME/hablo-captain.ts missing (re-run the HABLO installer)" >&2; exit 1; }
-command -v pi >/dev/null 2>&1 || { echo "hablo: pi is not on PATH" >&2; exit 1; }
+
+# firstmate's Pi extensions (fm-calm, etc.) need Pi >= 0.85 (`registerEntryRenderer`). A shell whose PATH
+# still has an older Node's global `pi` (e.g. nvm v22.14 → pi 0.74) makes `hablo` fail at extension load.
+# Prefer HABLO_PI / a stamped companion Node, then scan nvm for a pi that meets the floor.
+MIN_PI_VERSION="${HABLO_MIN_PI_VERSION:-0.85.0}"
+MIN_NODE_VERSION="${HABLO_MIN_NODE_VERSION:-22.19.0}"
+
+version_ge() { # $1 >= $2 (dotted numeric)
+  [ "$(printf '%s\n' "$1" "$2" | sort -t. -k1,1n -k2,2n -k3,3n | head -1)" = "$2" ]
+}
+
+pi_version_of() {
+  # $1 = pi binary path; print x.y.z or empty
+  "$1" --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1
+}
+
+node_version_of() {
+  "$1" -v 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1
+}
+
+pick_runtime() {
+  # Prints: <pi-bin>|<node-bin-dir-or-empty>
+  if [ -n "${HABLO_PI:-}" ] && [ -x "$HABLO_PI" ]; then
+    local v; v="$(pi_version_of "$HABLO_PI")"
+    if [ -n "$v" ] && version_ge "$v" "$MIN_PI_VERSION"; then
+      printf '%s|\n' "$HABLO_PI"
+      return 0
+    fi
+  fi
+  # Current PATH pi, if new enough
+  if command -v pi >/dev/null 2>&1; then
+    local cur; cur="$(command -v pi)"
+    local v; v="$(pi_version_of "$cur")"
+    local nodebin; nodebin="$(command -v node 2>/dev/null || true)"
+    local nv=""; [ -n "$nodebin" ] && nv="$(node_version_of "$nodebin")"
+    if [ -n "$v" ] && version_ge "$v" "$MIN_PI_VERSION"; then
+      if [ -n "$nv" ] && version_ge "$nv" "$MIN_NODE_VERSION"; then
+        printf '%s|%s\n' "$cur" "$(dirname "$nodebin")"
+        return 0
+      fi
+      # Pi is new enough but Node is old: pi's shebang is `env node`, so put Pi's own prefix first when it looks like nvm/npm global.
+      local pidir; pidir="$(cd "$(dirname "$cur")" && pwd -P)"
+      if [ -x "$pidir/node" ]; then
+        local pnv; pnv="$(node_version_of "$pidir/node")"
+        if [ -n "$pnv" ] && version_ge "$pnv" "$MIN_NODE_VERSION"; then
+          printf '%s|%s\n' "$cur" "$pidir"
+          return 0
+        fi
+      fi
+      # Accept pi anyway but warn — better than 0.74; caller may still hit engine quirks.
+      printf '%s|\n' "$cur"
+      return 0
+    fi
+  fi
+  # Scan nvm Node installs for a paired pi
+  local nvm="${NVM_DIR:-$HOME/.nvm}/versions/node"
+  if [ -d "$nvm" ]; then
+    local d pi_cand v
+    for d in "$nvm"/v*/bin; do
+      [ -x "$d/node" ] || continue
+      local nv; nv="$(node_version_of "$d/node")"
+      [ -n "$nv" ] && version_ge "$nv" "$MIN_NODE_VERSION" || continue
+      pi_cand=""
+      [ -x "$d/pi" ] && pi_cand="$d/pi"
+      if [ -z "$pi_cand" ] && [ -x "$d/../lib/node_modules/@earendil-works/pi-coding-agent/dist/bundle/cli.js" ]; then
+        # Prefer invoking via that Node explicitly later; for now require a pi shim.
+        continue
+      fi
+      [ -n "$pi_cand" ] || continue
+      v="$(pi_version_of "$pi_cand")"
+      [ -n "$v" ] && version_ge "$v" "$MIN_PI_VERSION" || continue
+      printf '%s|%s\n' "$pi_cand" "$d"
+      return 0
+    done
+  fi
+  return 1
+}
+
+RUNTIME="$(pick_runtime || true)"
+if [ -z "$RUNTIME" ]; then
+  echo "hablo: need Pi >= $MIN_PI_VERSION on Node >= $MIN_NODE_VERSION (firstmate extensions use registerEntryRenderer)." >&2
+  echo "       Your PATH's pi is too old or missing. Fix with:" >&2
+  echo "         nvm install $MIN_NODE_VERSION && nvm use $MIN_NODE_VERSION" >&2
+  echo "         npm install -g @earendil-works/pi-coding-agent" >&2
+  echo "       Or: export HABLO_PI=/path/to/pi  (and put matching node first on PATH)" >&2
+  if command -v pi >/dev/null 2>&1; then
+    echo "       Currently: $(command -v pi) -> $(pi_version_of "$(command -v pi)" || echo unknown) ; node $(node -v 2>/dev/null || echo missing)" >&2
+  fi
+  exit 1
+fi
+PI_BIN="${RUNTIME%%|*}"
+PI_NODE_DIR="${RUNTIME#*|}"
+if [ -n "$PI_NODE_DIR" ]; then
+  export PATH="$PI_NODE_DIR:$PATH"
+fi
+# Re-hash so subsequent `pi` / `node` match the chosen runtime (bash).
+hash -r 2>/dev/null || true
+PI_VER="$(pi_version_of "$PI_BIN" || echo unknown)"
+NODE_VER="$(node -v 2>/dev/null || echo unknown)"
+echo "hablo: runtime  pi $PI_VER ($PI_BIN) on node $NODE_VER" >&2
 
 proj="$(pwd -P)"
 root_real="$(cd "$FM_ROOT" && pwd -P)"
@@ -102,8 +203,29 @@ if [ "$VOYAGE_PROVIDER" != bedrouter ]; then
   echo "                Crew tokens bill to this provider." >&2
 fi
 
+# SSO + live bedrouter model allowlist (unknown/disabled aliases like fable fail here, not mid-scout).
+# HABLO_PREFLIGHT=skip bypasses; =soft warns without blocking. Source: bin/hablo-preflight in HABLO-installer.
+preflight=""
+for c in "$HABLO_HOME/hablo-preflight" "$(dirname "$0")/hablo-preflight" "$HABLO_INSTALLER/bin/hablo-preflight"; do
+  [ -x "$c" ] && { preflight="$c"; break; }
+done
+if [ -n "$preflight" ]; then
+  set +e
+  "$preflight" --provider "$PROVIDER" --model "$CREW_MODEL"
+  ec=$?
+  set -e
+  if [ "$ec" = 2 ]; then
+    echo "hablo: WARNING  preflight soft-failed; continuing (HABLO_PREFLIGHT=soft)" >&2
+  elif [ "$ec" != 0 ]; then
+    echo "hablo: preflight failed (fix SSO / bedrouter / model, or HABLO_PREFLIGHT=skip)" >&2
+    exit "$ec"
+  fi
+else
+  echo "hablo: WARNING  hablo-preflight not found; skipping SSO/model gate" >&2
+fi
+
 # Standing in the firstmate checkout itself: plain firstmate, its own discovery does the rest.
-if [ "$proj" = "$root_real" ]; then exec pi "$@"; fi
+if [ "$proj" = "$root_real" ]; then exec "$PI_BIN" "$@"; fi
 
 git -C "$proj" rev-parse --show-toplevel >/dev/null 2>&1 || { echo "hablo: $proj is not a git repository; firstmate works on git projects (worktrees, branches, PRs)" >&2; exit 1; }
 top="$(git -C "$proj" rev-parse --show-toplevel)"
@@ -137,4 +259,4 @@ done
 # `ps aux`, finds nothing because Pi runs extensions in-process, and then tries to restart a Pi it invents a
 # launcher for. Telling it what is already loaded is what stops that.
 export HABLO_PI_EXTENSIONS="${loaded# }"
-exec pi "$@"
+exec "$PI_BIN" "$@"
