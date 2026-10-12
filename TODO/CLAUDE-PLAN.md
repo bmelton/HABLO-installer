@@ -23,7 +23,7 @@ Interrogate and Progress are **not** Claude-only features. They shipped on Pi so
 - **Install:** prompt for default agent (`pi` / `claude` / `both`); `--agent` wins for scripts/CI.
 - **Runtime:** `hablo-config` toggles Pi ↔ Claude anytime; **warn** if `claude` missing / not on `PATH`; preference still saves.
 - **`hablo` launch:** if Claude selected but binary missing → **prompt to install or exit** (no silent Pi fallback).
-- **`hablo-guard`:** **optional** for first Claude ship (Pi does not fully have it yet). Add later with Pi per HOOKS / CLAUDE-CODE-GUARD.
+- **`hablo-guard`:** shipped (engine + Pi shim + Claude PreToolUse); `deps.*` still deferred
 - **Interrogate:** when `interrogate.enabled`, a Claude captain nudges the same senior-lead interview / TDD under `~/tdds/…` before spawn; explicit skip allowed. Skill pin + overlay already install-owned; Claude needs skill/plugin access + captain prompt parity.
 - **Progress:** every meaningful commit and PR open still update Jira (never Done). CLI (`hablo-jira progress` / `pr-opened`) is shared; Claude needs hook/policy parity with the Pi post-tool path (plugin hooks or equivalent).
 
@@ -120,7 +120,7 @@ Interrogate and progress keep their existing `hablo.json` keys; Claude does not 
 - [x] Phase 4: firstmate/`hablo` + missing-Claude install-or-exit prompt
 - [x] Phase 4b: Claude commit/PR → `hablo-jira` progress parity (plugin hooks in Phase 3)
 - [x] Phase 6: E2E fixtures (`test/e2e-claude.test.mjs`); live SSO smoke script (`bin/hablo-e2e-claude-smoke.sh`)
-- [ ] Phase 5 (optional later): guard with Pi
+- [x] Phase 5: fail-closed `hablo-guard` engine + Pi/Claude shims
 
 ## Non-goals
 

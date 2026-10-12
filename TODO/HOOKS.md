@@ -11,25 +11,25 @@
 > [later/CLAUDE-CODE-GUARD.md](later/CLAUDE-CODE-GUARD.md) adds the Claude Code
 > front end. One engine, one policy, three front ends over time.
 
-- [ ] Verify the seven behaviours in "Verify before you build"
-- [ ] `guard/`: `go.mod`, `Taskfile.yml`, `main.go`, `internal/*` skeleton
-- [ ] `internal/policy`: load, merge, validate; a bad policy is an error, never a pass
-- [ ] `internal/glob`: `**` segment matcher, stdlib only, with a table test
-- [ ] `internal/resolve`: symlink and `..` resolution for a path that may not exist yet
-- [ ] `internal/rules`: the four rule groups, each returning a rule id and a remedy
-- [ ] `internal/audit`: the JSONL log, with secret redaction
-- [ ] `decide`: one JSON request on stdin, one verdict on stdout
-- [ ] `probe`, `check`, `record`, `report`, `doctor`, `version` subcommands
-- [ ] Golden tests: one fixture per rule, allow and deny, captain and crewmate
-- [ ] Write `pi/extensions/hablo-guard.ts`, the shim, with no rule logic in it
-- [ ] Add the `guard` block to `hablo.json`
-- [ ] `install.mjs` step 12: build the binary, render `~/.hablo/guard.json`, install the extension
-- [ ] `install.mjs`: gate the whole step on a Go toolchain, and remove a stale shim when it is absent
-- [ ] Add `--skip-guard`, `--guard-mode`, `--rebuild-guard` and the usage header lines
-- [ ] Add the guard paths to `backup.config`, the log to `backup.history`
+- [ ] Verify the seven behaviours in "Verify before you build" (partial: global `-e` coexistence verified earlier)
+- [x] `guard/`: `go.mod`, `main.go`, `internal/*` skeleton (Taskfile deferred)
+- [x] `internal/policy`: load, merge, validate; a bad policy is an error, never a pass
+- [x] `internal/glob`: `**` segment matcher, stdlib only, with a table test
+- [x] `internal/resolve`: symlink and `..` resolution for a path that may not exist yet
+- [x] `internal/rules`: secrets / paths / shell (deps.* deferred to DEPENDENCY-TRUST)
+- [x] `internal/audit`: the JSONL log, with secret redaction
+- [x] `decide`: one JSON request on stdin, one verdict on stdout
+- [x] `probe`, `check`, `record`, `report`, `doctor`, `version` subcommands (check report-only stub)
+- [x] Golden tests: core deny/allow fixtures (expand over time)
+- [x] Write `pi/extensions/hablo-guard.ts`, the shim, with no rule logic in it
+- [x] Add the `guard` block to `hablo.json`
+- [x] `install.mjs` step 12: build the binary, render `~/.hablo/guard.json`, install the extension
+- [x] `install.mjs`: gate the whole step on a Go toolchain, and remove a stale shim when it is absent
+- [x] Add `--skip-guard`, `--guard-mode`, `--rebuild-guard` and the usage header lines
+- [x] Add the guard paths to `backup.config`, the log to `backup.history`
 - [ ] Measure the per-call cost of `decide` and the per-edit cost of `check`
-- [ ] `README.md`: what the guard denies, how to allow something, how to turn it off
-- [ ] Record the guard artifacts in the uninstall receipt ([UNINSTALL-PI-AND-EVERYTHING.md](UNINSTALL-PI-AND-EVERYTHING.md))
+- [x] `README.md`: what the guard denies, how to allow something, how to turn it off
+- [x] Record the guard artifacts in the uninstall receipt ([UNINSTALL-PI-AND-EVERYTHING.md](UNINSTALL-PI-AND-EVERYTHING.md))
 
 ## What this is
 

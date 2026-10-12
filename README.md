@@ -25,11 +25,27 @@ Idempotent: run it again any time; it only changes what differs and never overwr
 | 9 | Clones (or fast-forwards) [kunchenguid/firstmate](https://github.com/kunchenguid/firstmate); `config/crew-harness` = active agent (`pi` or `claude`); matching `crew-dispatch.json` (Pi or Claude twin); `claude-permission-mode=auto` when Claude; branch, OpenWiki, and plain-language policies in `data/captain.md`; optional `config/backend` | `~/firstmate` (`--firstmate-dir`) |
 | 10 | Installs the `hablo` command (Pi or Claude Code branch from `~/.hablo/agent`), `bedrouter` PATH shim, captain prompt (`hablo-captain.ts` / `hablo-captain-prompt.sh`), global Pi extensions when relevant | `~/.local/bin/hablo`, `~/.local/bin/bedrouter`, `~/.hablo/`, `~/.pi/agent/extensions/` |
 | 11 | Installs firstmate tool deps (`gh-axi`, …, `treehouse`, `no-mistakes`). When agent includes Claude, also runs `*-axi setup hooks` | npm's global prefix, `~/.local/bin`, Claude session hooks |
+| 12 | Builds `hablo-guard`, renders `~/.hablo/guard.json`, installs the Pi shim; Claude `PreToolUse` ships with the plugin | `~/.local/bin/hablo-guard`, `~/.pi/agent/extensions/hablo-guard.ts`, plugin hooks |
 | 13 | Builds the Jira reporting CLI and labelled-ticket dispatch agent, renders their shared configuration, and installs a launchd agent or systemd user timer | `~/.local/bin/hablo-jira*`, `~/.hablo/jira/`, user service configuration |
 | 14 | Builds Dream, which distills recent corrections into reviewed rule proposals, renders its configuration, and installs a daily launchd or systemd timer | `~/.local/bin/hablo-dream`, `~/.hablo/dream/`, user service configuration |
 | 15 | Builds `hablo-config`, a Bubble Tea TUI for editing runtime files (Jira, secrets, Spy, Dream, firstmate, CLI stamps, Agent) | `~/.local/bin/hablo-config`; `hablo config` |
 
 Then: `pi --provider bedrouter --model auto`. For firstmate: `cd <your project> && hablo` (or `cd ~/firstmate && pi`) — firstmate's `AGENTS.md` takes over the session, and it spawns crewmates as `pi --model bedrouter/auto` processes in tmux, routed explicitly by the dispatch file the installer writes. With `~/.hablo/agent` = `claude`, `hablo` launches Claude Code instead (bedrouter Messages `auto`). pi-bedrouter starts the server on first use, shows what served each request in the footer, and `/bedrouter status|probe|report`, `/openwiki doctor` work from inside Pi. From any shell, `bedrouter doctor --probe` uses the same `~/.bedrouter` home.
+
+### Tool-call guard (`hablo-guard`)
+
+Fail-closed engine shared by Pi and Claude Code. Denies credential reads/writes, secret shapes in diffs, destructive shell (`rm -rf`, `sudo`, force-push to main/develop), writes to `node_modules` / agent state, and (when `HABLO_PROJECT` is set) writes outside the project. Not a sandbox: shell can still hide work inside scripts.
+
+| | |
+| --- | --- |
+| Policy | `hablo.json` → `~/.hablo/guard.json` (project may *add* rules in `.hablo/guard.json`, never `allow` / `mode`) |
+| Engine | `~/.local/bin/hablo-guard` |
+| Pi | `~/.pi/agent/extensions/hablo-guard.ts` (global; covers crewmates) |
+| Claude | plugin `PreToolUse` → `hablo-guard.mjs` (explicit deny on any engine failure) |
+| Escape | `HABLO_GUARD=off` (loud) or `--guard-mode warn\|off`; permanent bypass = `guard.allow` entry with a **note** + re-install |
+| Flags | `--skip-guard`, `--guard-mode enforce\|warn\|off`, `--rebuild-guard` |
+
+`hablo-guard doctor` / `report --since 1h` for policy and audit. Dependency-trust rules (`deps.*`) are specified separately and not enabled in v1.
 
 ### Tests and Claude E2E
 

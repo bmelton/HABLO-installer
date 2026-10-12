@@ -5,6 +5,21 @@
         {
           "type": "command",
           "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/start-bedrouter.mjs\""
+        },
+        {
+          "type": "command",
+          "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/session-kind.mjs\""
+        }
+      ]
+    }
+  ],
+  "PreToolUse": [
+    {
+      "matcher": "Read|Write|Edit|Bash|NotebookEdit",
+      "hooks": [
+        {
+          "type": "command",
+          "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/hablo-guard.mjs\""
         }
       ]
     }

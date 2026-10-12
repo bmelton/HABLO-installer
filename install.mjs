@@ -21,6 +21,7 @@
 //                    [--skip-publish] [--publish-repo <owner/name>] [--publish-cred gh|env|auto]   team stats
 //                    [--skip-dream] [--dream-at HH:MM] [--no-dream-service]
 //                    [--interrogate|--no-interrogate]   override interrogate.enabled for this install (captain policy)
+//                    [--skip-guard] [--guard-mode enforce|warn|off] [--rebuild-guard]   fail-closed tool-call guard
 //                    [--install-pi]   install the Pi CLI via https://pi.dev/install.sh when it is missing
 //                    [--install-claude]   remind how to install Claude Code when it is missing (native installer)
 //
@@ -40,6 +41,7 @@
 //  10 cli         `hablo` + bedrouter shim + hablo-preflight + hablo-fleet-reset; captain/crewmate/tone/progress Pi extensions
 //  11 tools       firstmate's tool dependencies: npm -g gh-axi chrome-devtools-axi lavish-axi tasks-axi quota-axi;
 //                 treehouse and no-mistakes via their install scripts into ~/.local/bin (no sudo)
+//  12 guard       build hablo-guard, render ~/.hablo/guard.json, install Pi shim (Claude hooks via plugin)
 //  13 jira        build the reporting CLI and dispatch agent, render config, install and start the user scheduler
 //  14 dream       build the fleet correction digest, render config, install and start its daily timer
 //  15 config      build hablo-config (Bubble Tea runtime file editor); hablo config execs it
@@ -1056,7 +1058,7 @@ step(7, "agent profiles and workflows");
     };
 
     // Manifest + static assets (always refresh: plugin is HABLO-owned).
-    for (const rel of [".claude-plugin/marketplace.json", ".claude-plugin/plugin.json", "hooks/hooks.json", "hooks/progress.mjs", "skills/openwiki/SKILL.md", "commands/ticket.md", "commands/review-round.md"]) {
+    for (const rel of [".claude-plugin/marketplace.json", ".claude-plugin/plugin.json", "hooks/hooks.json", "hooks/progress.mjs", "hooks/hablo-guard.mjs", "hooks/session-kind.mjs", "skills/openwiki/SKILL.md", "commands/ticket.md", "commands/review-round.md"]) {
       const src = path.join(srcRoot, rel);
       if (!fs.existsSync(src)) fail(`missing ${src}`);
       writePluginFile(rel, fs.readFileSync(src, "utf8"), rel.endsWith(".mjs") ? 0o755 : undefined);
@@ -1504,6 +1506,86 @@ else {
       }
     }
   } else note("(the *-axi `setup hooks` step is not run: it installs Claude Code/Codex/OpenCode session hooks, which Pi does not use)");
+}
+
+// ---- 12 fail-closed tool-call guard -------------------------------------------------------------------------------------
+step(12, "hablo-guard (fail-closed tool-call engine + shims)");
+{
+  const g = manifest.guard ?? {};
+  const guardBin = path.join(binDir, g.engine?.binName ?? "hablo-guard");
+  const guardPolicyPath = path.join(habloHome, "guard.json");
+  const shimSrc = path.join(here, "pi", "extensions", "hablo-guard.ts");
+  const shimDst = path.join(agentDir, "extensions", "hablo-guard.ts");
+  const removeShim = () => {
+    if (fs.existsSync(shimDst)) {
+      const cur = fs.readFileSync(shimDst, "utf8");
+      if (/HABLO-installer|hablo-guard/.test(cur)) {
+        if (!DRY) {
+          const prior = fileState(shimDst);
+          fs.unlinkSync(shimDst);
+          record({ kind: "file.remove", path: homePath(shimDst), priorSha256: prior.sha256 });
+        }
+        did(`remove ${homePath(shimDst)} (no engine)`);
+      }
+    }
+  };
+  if (flag("skip-guard") || g.mode === "skip") {
+    note("skipped (--skip-guard)");
+    removeShim();
+  } else if (!which("go")) {
+    warn("Go toolchain missing; skip hablo-guard (install Go 1.22+ and re-run, or pass --skip-guard). Removing stale Pi shim so sessions are not bricked.");
+    removeShim();
+  } else {
+    const mode = opt("guard-mode", g.mode ?? "enforce");
+    if (!["enforce", "warn", "off"].includes(mode)) fail(`--guard-mode must be enforce|warn|off (got ${JSON.stringify(mode)})`);
+    const rendered = structuredClone(g);
+    delete rendered.$comment;
+    rendered.mode = mode;
+    // Expand ~ in engine paths at install time (engine also expands).
+    const expandGuard = (obj) => {
+      if (!obj || typeof obj !== "object") return;
+      for (const [k, v] of Object.entries(obj)) {
+        if (typeof v === "string" && v.startsWith("~/")) obj[k] = expand(v);
+        else if (Array.isArray(v)) v.forEach((item, i) => {
+          if (typeof item === "string" && item.startsWith("~/")) v[i] = expand(item);
+          else if (item && typeof item === "object") expandGuard(item);
+        });
+        else if (v && typeof v === "object") expandGuard(v);
+      }
+    };
+    expandGuard(rendered);
+    writeJson(guardPolicyPath, rendered);
+    did(`render ${homePath(guardPolicyPath)} (mode=${mode})`);
+
+    const needsBuild = flag("rebuild-guard") || !fs.existsSync(guardBin);
+    if (needsBuild || flag("rebuild-guard")) {
+      did(`build ${guardBin}`);
+      if (!DRY) {
+        fs.mkdirSync(binDir, { recursive: true });
+        const prior = fileState(guardBin);
+        const r = run("go", ["build", "-trimpath", "-o", guardBin, "."], { cwd: path.join(here, "guard"), timeout: 600_000, env: goEnv });
+        if (r.status !== 0) {
+          warn(`could not build hablo-guard: ${(r.stderr || r.stdout).trim().split("\n")[0]}; removing shim`);
+          removeShim();
+        } else {
+          fs.chmodSync(guardBin, 0o755);
+          record({ kind: prior.exists ? "file.update" : "file.create", path: homePath(guardBin), sha256: sha256(fs.readFileSync(guardBin)), ...(prior.sha256 ? { priorSha256: prior.sha256 } : {}) });
+        }
+      }
+    } else note(`${homePath(guardBin)} present (pass --rebuild-guard to rebuild)`);
+
+    if (fs.existsSync(guardBin) || DRY) {
+      // Global Pi shim so crewmates (no hablo -e) are covered.
+      installFile(shimSrc, shimDst, (t) => t, 0o644);
+      if (!DRY && fs.existsSync(guardBin)) {
+        const doc = run(guardBin, ["doctor"], { timeout: 15_000 });
+        if (doc.status === 0) note((doc.stdout || "").trim().split("\n")[0] || "hablo-guard doctor ok");
+        else warn(`hablo-guard doctor failed: ${(doc.stderr || doc.stdout || "").trim().split("\n")[0]}`);
+      }
+      note("escape: HABLO_GUARD=off (loud) or --guard-mode warn|off; allow entries need a note in hablo.json");
+      note("Claude PreToolUse shim ships with the HABLO plugin (step 7)");
+    }
+  }
 }
 
 // ---- 13 Jira reporting and dispatch -------------------------------------------------------------------------------------

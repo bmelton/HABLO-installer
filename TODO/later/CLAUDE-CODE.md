@@ -13,7 +13,7 @@
 - [x] [Plugin](CLAUDE-CODE-PLUGIN.md): agents, commands, skills and workflows as one installable unit (incl. TDD/interrogate skill when enabled)
 - [x] [firstmate](CLAUDE-CODE-FIRSTMATE.md): the `claude` crew harness, the permission posture, and the `hablo` wrapper (captain prompt carries interrogate + progress duties)
 - [x] Progress parity: Claude hooks calling shared `hablo-jira progress` / `pr-opened` after commit and PR open
-- [ ] [Guard](CLAUDE-CODE-GUARD.md): the fail-closed tool-call guard on Claude Code hooks (**optional for first ship**; see CLAUDE-PLAN)
+- [x] [Guard](CLAUDE-CODE-GUARD.md): the fail-closed tool-call guard on Claude Code hooks (`hablo-guard` + plugin PreToolUse)
 - [x] `README.md`: Claude routing/plugin/`hablo` sections
 - [x] End-to-end: fixture suite `test/e2e-claude.test.mjs`; live `bin/hablo-e2e-claude-smoke.sh`
 

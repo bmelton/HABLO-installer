@@ -6,15 +6,15 @@
 > engine, two front ends. Read that document first; this one does not repeat the
 > rules, the policy schema, or the engine contract.
 
-- [ ] Verify what Claude Code does when a `PreToolUse` hook crashes or times out
-- [ ] Write `claude/hooks/hablo-guard.mjs`: marshal the event, run `hablo-guard decide`, honour the verdict
-- [ ] Write `claude/hooks/hooks.json` with the `PreToolUse` and `PostToolUse` matchers
-- [ ] Write the session-kind probe into the plugin's `SessionStart` hook
-- [ ] Map Claude Code tool names and argument shapes onto the engine request
-- [ ] Implement `HABLO_GUARD=off` and make it loud
-- [ ] Add `.hablo/guard.json` to `backup.config` in `hablo.json`
-- [ ] Test every rule against a real session, captain and crewmate
-- [ ] `README.md`: document the guard once, for both agents
+- [ ] Verify what Claude Code does when a `PreToolUse` hook crashes or times out (shim converts errors to explicit deny; timeout still a platform risk)
+- [x] Write `claude/hooks/hablo-guard.mjs`: marshal the event, run `hablo-guard decide`, honour the verdict
+- [x] Write `claude/hooks/hooks.json` with the `PreToolUse` and `PostToolUse` matchers
+- [x] Write the session-kind probe into the plugin's `SessionStart` hook
+- [x] Map Claude Code tool names and argument shapes onto the engine request
+- [x] Implement `HABLO_GUARD=off` and make it loud
+- [x] Add `.hablo/guard.json` to `backup.config` in `hablo.json`
+- [ ] Test every rule against a real session, captain and crewmate (fixture/engine tests landed; live session still open)
+- [x] `README.md`: document the guard once, for both agents
 
 ## Why this belongs in the Claude Code work
 

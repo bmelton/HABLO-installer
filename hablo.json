@@ -178,6 +178,67 @@
     },
     "$comment2": "backend: null keeps firstmate's auto-detection (tmux). Set \"herdr\" (or pass --backend herdr) to write config/backend."
   },
+  "guard": {
+    "$comment": "Fail-closed tool-call guard. Installer renders this to ~/.hablo/guard.json; hablo-guard (Go) is the engine; Pi extension + Claude PreToolUse are shims. mode: enforce|warn|off. HABLO_GUARD=off disables for one session (loud).",
+    "mode": "enforce",
+    "engine": {
+      "binName": "hablo-guard",
+      "timeoutMs": 3000,
+      "auditLog": "~/.hablo/guard-log.jsonl",
+      "cacheDir": "~/.hablo/guard-cache"
+    },
+    "ask": { "timeoutSeconds": 120 },
+    "exfilTools": ["web_fetch", "web_search", "WebFetch", "WebSearch"],
+    "secrets": {
+      "interactive": false,
+      "maxScanBytes": 8388608,
+      "paths": [
+        ".env", ".env.*", "**/.env", "**/.env.*",
+        "~/.aws/credentials", "~/.pi/agent/auth.json", "~/.bedrouter/.env",
+        "**/*.pem", "**/id_rsa", "**/id_ed25519", "**/id_*.key"
+      ],
+      "patterns": [
+        "AKIA[0-9A-Z]{16}",
+        "ghp_[A-Za-z0-9]{36}",
+        "xox[baprs]-[A-Za-z0-9-]{10,}",
+        "sk-[A-Za-z0-9]{20,}",
+        "-----BEGIN [A-Z ]*PRIVATE KEY-----"
+      ],
+      "exfilCommands": ["curl", "nc", "ncat", "scp", "rsync", "wget"],
+      "exfilHosts": ["pastebin.com", "gist.github.com", "transfer.sh", "0x0.st"]
+    },
+    "protectedPaths": [
+      { "rule": "paths.generated", "glob": "**/*.pb.go", "interactive": true },
+      { "rule": "paths.generated", "glob": "**/*_gen.go", "interactive": true },
+      { "rule": "paths.generated", "glob": "**/*.generated.*", "interactive": true },
+      { "rule": "paths.generated", "glob": "**/package-lock.json", "interactive": true },
+      { "rule": "paths.vendored", "glob": "**/node_modules/**", "interactive": true },
+      { "rule": "paths.vendored", "glob": "**/vendor/**", "interactive": true },
+      { "rule": "paths.foreign", "outsideProject": true, "interactive": true },
+      { "rule": "paths.agentState", "glob": "~/.hablo/**", "interactive": false },
+      { "rule": "paths.agentState", "glob": "~/.pi/agent/**", "interactive": false },
+      { "rule": "paths.agentState", "glob": "~/.bedrouter/**", "interactive": false }
+    ],
+    "shell": {
+      "interactive": true,
+      "deny": [
+        "\\brm\\s+(-[a-zA-Z]*r[a-zA-Z]*f|--recursive\\s+--force)",
+        "\\bgit\\s+reset\\s+--hard\\b",
+        "\\bgit\\s+clean\\s+-[a-zA-Z]*f[a-zA-Z]*d\\b",
+        "\\bsudo\\b",
+        "\\bnpm\\s+.*--unsafe-perm\\b"
+      ],
+      "denyForceePushTo": ["develop", "main", "master"]
+    },
+    "postEdit": {
+      "turnBudgetMs": 5000,
+      "checks": [
+        { "id": "gofmt", "command": "gofmt -l", "glob": "**/*.go", "timeoutMs": 5000, "onFail": "warn" },
+        { "id": "govet", "command": "go vet", "glob": "**/*.go", "timeoutMs": 20000, "onFail": "warn" }
+      ]
+    },
+    "allow": []
+  },
   "interrogate": {
     "$comment": "When enabled, captain nudges a senior-lead interview and markdown TDD under ~/tdds before implementation spawns. User may explicitly skip. ADRs optional in the same folder. skill.sha is refreshed on hablo update via the install fetch step after a HABLO release bumps the pin. Soft-fail if enterprise gh cannot fetch.",
     "enabled": false,
@@ -280,11 +341,14 @@
       ".pi/agent/extensions/hablo-tone.ts",
       ".pi/agent/extensions/hablo-crewmate.ts",
       ".pi/agent/extensions/hablo-progress.ts",
+      ".pi/agent/extensions/hablo-guard.ts",
       ".pi/workflows",
       ".local/bin/hablo",
       ".local/bin/hablo-preflight",
       ".local/bin/hablo-fleet-reset",
+      ".local/bin/hablo-guard",
       ".local/bin/bedrouter",
+      ".hablo/guard.json",
       ".hablo/hablo-captain.ts",
       ".hablo/hablo-captain-prompt.sh",
       ".hablo/crew-dispatch-pi.json",
