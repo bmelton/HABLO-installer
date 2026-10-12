@@ -11,7 +11,7 @@
 > (Phase 0a). Claude MVP extends those product rules; it does not redefine them.
 
 - [x] [Agent selection](CLAUDE-CODE-AGENT-SELECTION.md): the install-time prompt, `--agent`, marker, receipt (manifest `agents.pi` move deferred)
-- [ ] [Routing](CLAUDE-CODE-ROUTING.md): Claude Code reaches Bedrock through bedrouter
+- [x] [Routing](CLAUDE-CODE-ROUTING.md): Claude Code reaches Bedrock through bedrouter (settings.env + SessionStart; live smoke still open)
 - [ ] [Plugin](CLAUDE-CODE-PLUGIN.md): agents, commands, skills and workflows as one installable unit (incl. TDD/interrogate skill when enabled)
 - [ ] [firstmate](CLAUDE-CODE-FIRSTMATE.md): the `claude` crew harness, the permission posture, and the `hablo` wrapper (captain prompt carries interrogate + progress duties)
 - [ ] Progress parity: Claude hooks calling shared `hablo-jira progress` / `pr-opened` after commit and PR open

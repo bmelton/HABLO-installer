@@ -12,9 +12,16 @@
       "cliPackage": "@anthropic-ai/claude-code",
       "marketplace": "~/.hablo/claude",
       "plugin": "hablo",
+      "settingsPath": "~/.claude/settings.json",
+      "hooksDir": "~/.hablo/claude/hooks",
+      "autoModel": "auto",
       "settings": {
-        "$comment": "Phase 2 merges env (ANTHROPIC_BASE_URL / AUTH_TOKEN / MODEL) into ~/.claude/settings.json.",
-        "env": {}
+        "$comment": "Install fills ANTHROPIC_* from bedrouter.port + generated BEDROUTER_API_KEY; merges into ~/.claude/settings.json only where keys are absent.",
+        "env": {
+          "ANTHROPIC_BASE_URL": null,
+          "ANTHROPIC_AUTH_TOKEN": null,
+          "ANTHROPIC_MODEL": null
+        }
       }
     }
   },
@@ -285,8 +292,10 @@
       ,".hablo/dream/config.json"
       ,".local/bin/hablo-dream"
       ,".local/bin/hablo-config"
-      ,".hablo/interrogate.json"
+      ,      ".hablo/interrogate.json"
       ,".hablo/interrogate"
+      ,".hablo/claude"
+      ,".claude/settings.json"
       ,".pi/agent/skills/technical-design-doc"
       ,"Library/LaunchAgents/dev.hablo.dream.plist"
       ,".config/systemd/user/hablo-dream.service"

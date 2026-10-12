@@ -115,7 +115,7 @@ Interrogate and progress keep their existing `hablo.json` keys; Claude does not 
 - [x] Progress on Pi (`PROGRESS-UPDATE-PLAN.md` (workspace backlog))
 - [ ] Live Claude+SSO streaming `tool_use` smoke against bedrouter
 - [x] Phase 1: install prompt + `--agent` + marker + receipt
-- [ ] Phase 2: Claude + bedrouter settings + SessionStart
+- [x] Phase 2: Claude + bedrouter settings + SessionStart
 - [ ] Phase 3: HABLO Claude plugin (incl. TDD/interrogate skill surface)
 - [ ] Phase 4: firstmate/`hablo` + missing-Claude install-or-exit prompt
 - [ ] Phase 4b: Claude commit/PR → `hablo-jira` progress parity

@@ -11,13 +11,13 @@
 - [ ] `bedrouter`: confirm streaming `tool_use` blocks survive the `/v1/messages` path (Claude Code + SSO smoke)
 - [ ] `bedrouter`: add `POST /v1/messages/count_tokens` (0c, nice-to-have)
 - [ ] `bedrouter`: pass `cache_control` blocks through to Bedrock, or strip them and say so (0c)
-- [ ] `hablo.json`: add `agents.claude.settings.env` with the three variables
-- [ ] `install.mjs` step 3: merge the `env` block into `~/.claude/settings.json`, never overwrite
-- [ ] `install.mjs` step 4: write `BEDROUTER_API_KEY` into `~/.bedrouter/.env`
-- [ ] Plugin: a `SessionStart` hook that starts bedrouter when the port is closed
+- [x] `hablo.json`: add `agents.claude.settings.env` with the three variables
+- [x] `install.mjs` step 4b: merge the `env` block into `~/.claude/settings.json`, never overwrite
+- [x] `install.mjs` step 4b: write `BEDROUTER_API_KEY` into `~/.bedrouter/.env`
+- [x] SessionStart hook (`~/.hablo/claude/hooks/start-bedrouter.mjs`) starts bedrouter when the port is closed (full plugin marketplace is Phase 3)
 - [ ] Verify a full tool-using turn end to end against a live Bedrock account
 - [ ] Measure the cost of no prompt caching on a real session, and record the number
-- [ ] `README.md`: how to point Claude Code somewhere else, and how to undo it
+- [x] `README.md`: how to point Claude Code somewhere else, and how to undo it
 
 ## What this is
 

@@ -168,6 +168,58 @@ test("agent selection writes marker, tags receipt, and refuses claude+oss ladder
   }
 });
 
+test("Claude routing merges settings.env, API key, and SessionStart without clobbering", () => {
+  const f = fixture();
+  try {
+    // Pre-existing operator key must be preserved.
+    const claudeDir = path.join(f.home, ".claude");
+    fs.mkdirSync(claudeDir, { recursive: true });
+    fs.writeFileSync(path.join(claudeDir, "settings.json"), JSON.stringify({
+      env: { ANTHROPIC_MODEL: "keep-me" },
+      hooks: { SessionStart: [{ hooks: [{ type: "command", command: "echo operator" }] }] },
+    }, null, 2) + "\n");
+
+    // Seed a global bedrouter so Claude-only does not need a real npm install.
+    const brPkg = path.join(f.npmModules, "bedrouter", "dist");
+    fs.mkdirSync(brPkg, { recursive: true });
+    fs.writeFileSync(path.join(brPkg, "cli.js"), "#!/usr/bin/env node\nconsole.log('bedrouter stub');\n");
+    fs.writeFileSync(path.join(f.npmModules, "bedrouter", "package.json"), JSON.stringify({ name: "bedrouter", version: "0.10.0" }));
+    writeExecutable(path.join(f.fakeBin, "npm"), `#!/bin/sh
+if [ "$1" = root ] && [ "$2" = -g ]; then echo ${JSON.stringify(f.npmModules)}; exit 0; fi
+exit 0
+`);
+
+    const out = install(f, ["--agent", "claude", "--skip-cli", "--skip-firstmate", "--skip-jira", "--skip-dream"]);
+    assert.match(out, /\[4b\] Claude Code routing/);
+    assert.match(out, /ANTHROPIC_BASE_URL/);
+    assert.match(out, /claude settings\.env\.ANTHROPIC_MODEL already set/);
+
+    const brEnv = fs.readFileSync(path.join(f.home, ".bedrouter", ".env"), "utf8");
+    assert.match(brEnv, /^BEDROUTER_API_KEY=\S+/m);
+    const key = brEnv.match(/^BEDROUTER_API_KEY=(\S+)/m)[1];
+
+    const settings = JSON.parse(fs.readFileSync(path.join(claudeDir, "settings.json"), "utf8"));
+    assert.equal(settings.env.ANTHROPIC_MODEL, "keep-me");
+    assert.equal(settings.env.ANTHROPIC_BASE_URL, "http://127.0.0.1:20129");
+    assert.equal(settings.env.ANTHROPIC_AUTH_TOKEN, key);
+    assert.equal(settings.hooks.SessionStart.length, 2);
+    assert.match(JSON.stringify(settings.hooks.SessionStart), /start-bedrouter/);
+    assert.match(JSON.stringify(settings.hooks.SessionStart), /echo operator/);
+
+    const hook = fs.readFileSync(path.join(f.home, ".hablo", "claude", "hooks", "start-bedrouter.mjs"), "utf8");
+    assert.match(hook, /20129/);
+    assert.doesNotMatch(hook, /__BEDROUTER_PORT__/);
+
+    // Re-run is idempotent and does not duplicate the hook.
+    install(f, ["--agent", "claude", "--skip-cli", "--skip-firstmate", "--skip-jira", "--skip-dream"]);
+    const again = JSON.parse(fs.readFileSync(path.join(claudeDir, "settings.json"), "utf8"));
+    assert.equal(again.hooks.SessionStart.length, 2);
+    assert.equal(again.env.ANTHROPIC_AUTH_TOKEN, key);
+  } finally {
+    fs.rmSync(f.dir, { recursive: true, force: true });
+  }
+});
+
 test("Wave 0 installs and disables tone policy while appending receipt runs", () => {
   const f = fixture();
   try {

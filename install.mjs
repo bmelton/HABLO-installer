@@ -456,7 +456,7 @@ applyInstallAgent();
     warn(tip);
   }
   if (wantsClaude) {
-    note("Claude Code routing/plugin/hablo launch branch land in later phases; this install records agent preference + shared bedrouter/firstmate machinery");
+    note("Claude Code: step 4b wires ~/.claude/settings.json → bedrouter; plugin assets and hablo Claude launch land in later phases");
   }
 }
 
@@ -839,6 +839,87 @@ if (!publishOn) {
   else if (envHasToken) note(`  credential: BEDROUTER_PUBLISH_TOKEN in ${homePath(envPath)}`);
   else warn(`publishing is configured but this machine has no credential yet. Run \`gh auth login\`, or add BEDROUTER_PUBLISH_TOKEN to ${homePath(envPath)}. Nothing is published until then.`);
   note(`  turn it off with --skip-publish`);
+}
+
+// ---- 4b Claude Code → bedrouter --------------------------------------------------------------------------------------
+step("4b", "Claude Code routing (settings.env + SessionStart)");
+if (!wantsClaude) note("skipped (agent does not include claude)");
+else {
+  const claudeManifest = manifest.agents?.claude ?? {};
+  const claudeSettingsPath = expand(claudeManifest.settingsPath ?? "~/.claude/settings.json");
+  const hooksDir = expand(claudeManifest.hooksDir ?? path.join(habloHome, "claude", "hooks"));
+  const bedrouterBin = path.join(expand(opt("bin-dir", manifest.cli.binDir)), "bedrouter");
+  const port = Number(manifest.bedrouter.port) || 20129;
+  const autoModel = claudeManifest.autoModel ?? "auto";
+
+  // Shared secret: bedrouter accepts any bearer when unset; Claude sessions need a real token in settings.env.
+  let apiKey = "";
+  {
+    const cur = fs.existsSync(envPath) ? fs.readFileSync(envPath, "utf8") : "";
+    const m = cur.match(/^\s*(?:export\s+)?BEDROUTER_API_KEY\s*=\s*(.*)$/m);
+    apiKey = m ? m[1].trim().replace(/^["']|["']$/g, "") : "";
+    if (!apiKey) {
+      apiKey = crypto.randomBytes(24).toString("base64url");
+      const next = (cur.replace(/\s*$/, "\n") || "") + `BEDROUTER_API_KEY=${apiKey}\n`;
+      writeText(envPath, next, { record: false });
+      record({ kind: "env.set", path: homePath(envPath), key: "BEDROUTER_API_KEY", value: "(generated)", prior: null, sha256: sha256(next) });
+      did(`generate BEDROUTER_API_KEY in ${homePath(envPath)}`);
+    } else note("BEDROUTER_API_KEY already set in bedrouter .env");
+  }
+
+  const wantEnv = {
+    ANTHROPIC_BASE_URL: `http://127.0.0.1:${port}`,
+    ANTHROPIC_AUTH_TOKEN: apiKey,
+    ANTHROPIC_MODEL: autoModel,
+  };
+
+  try { if (fs.lstatSync(claudeSettingsPath).isSymbolicLink()) note(`${homePath(claudeSettingsPath)} is a symlink (${fs.readlinkSync(claudeSettingsPath)}): writing through the link`); } catch { /* absent */ }
+  const claudeExisted = fs.existsSync(claudeSettingsPath);
+  const claudeSettings = readJson(claudeSettingsPath, {});
+  if (typeof claudeSettings !== "object" || claudeSettings === null || Array.isArray(claudeSettings)) fail(`${claudeSettingsPath} is not a JSON object`);
+  claudeSettings.env = claudeSettings.env && typeof claudeSettings.env === "object" ? claudeSettings.env : {};
+  const claudeActions = [];
+  for (const [key, value] of Object.entries(wantEnv)) {
+    if (claudeSettings.env[key] === undefined) {
+      claudeActions.push({ kind: "json.set", path: homePath(claudeSettingsPath), key: `env.${key}`, value: key === "ANTHROPIC_AUTH_TOKEN" ? "(redacted)" : value, prior: null, priorPresent: false });
+      claudeSettings.env[key] = value;
+      did(`claude settings.env.${key} = ${key === "ANTHROPIC_AUTH_TOKEN" ? "(generated)" : value}`);
+    } else note(`claude settings.env.${key} already set; left unchanged`);
+  }
+
+  // SessionStart: start bedrouter when the port is closed. Never auto-stop.
+  const hookSrc = path.join(here, "claude", "hooks", "start-bedrouter.mjs");
+  const hookDst = path.join(hooksDir, "start-bedrouter.mjs");
+  if (!fs.existsSync(hookSrc)) fail(`missing ${hookSrc}`);
+  const hookBody = fs.readFileSync(hookSrc, "utf8")
+    .replace(/__BEDROUTER_PORT__/g, String(port))
+    .replace(/__BEDROUTER_HOME__/g, brHome)
+    .replace(/__HABLO_BEDROUTER_BIN__/g, bedrouterBin);
+  writeText(hookDst, hookBody);
+  if (!DRY && fs.existsSync(hookDst)) fs.chmodSync(hookDst, 0o755);
+  did(`install ${homePath(hookDst)}`);
+
+  const hookCmd = `node ${hookDst}`;
+  const habloHook = { hooks: [{ type: "command", command: hookCmd }] };
+  claudeSettings.hooks = claudeSettings.hooks && typeof claudeSettings.hooks === "object" ? claudeSettings.hooks : {};
+  const sessionStart = Array.isArray(claudeSettings.hooks.SessionStart) ? claudeSettings.hooks.SessionStart : [];
+  const already = sessionStart.some((entry) => JSON.stringify(entry).includes(hooksDir) || JSON.stringify(entry).includes("start-bedrouter"));
+  if (!already) {
+    claudeSettings.hooks.SessionStart = [...sessionStart, habloHook];
+    claudeActions.push({ kind: "json.set", path: homePath(claudeSettingsPath), key: "hooks.SessionStart", value: "(HABLO start-bedrouter)", prior: sessionStart.length ? "(prior hooks kept)" : null, priorPresent: sessionStart.length > 0 });
+    did(`append SessionStart hook → ${homePath(hookDst)}`);
+  } else note("SessionStart already includes HABLO start-bedrouter");
+
+  if (claudeActions.length) {
+    const text = JSON.stringify(claudeSettings, null, 2) + "\n";
+    for (const action of claudeActions) action.sha256 = sha256(text);
+    writeJson(claudeSettingsPath, claudeSettings, { record: false });
+    if (!claudeExisted) record({ kind: "file.create", path: homePath(claudeSettingsPath), sha256: sha256(text) });
+    recordMany(claudeActions);
+  } else note(`${homePath(claudeSettingsPath)} Claude routing up to date`);
+
+  note("undo: remove ANTHROPIC_BASE_URL / ANTHROPIC_AUTH_TOKEN / ANTHROPIC_MODEL from env in ~/.claude/settings.json (and the HABLO SessionStart hook)");
+  note("native CLAUDE_CODE_USE_BEDROCK=1 is a manual escape hatch; HABLO does not set it");
 }
 
 // ---- 5 aws ----------------------------------------------------------------------------------------------------------
@@ -1453,7 +1534,8 @@ log(`\nDone${DRY ? " (dry run; nothing written)" : ""}${warnings.length ? ` with
     next.push("  in a repo with a wiki: /openwiki doctor");
   }
   if (wantsClaude) {
-    next.push("  Claude Code: Phase 2 wires ~/.claude settings → bedrouter; until then use ANTHROPIC_BASE_URL manually if needed");
+    next.push("  Claude Code: ~/.claude/settings.json env → bedrouter; SessionStart starts the daemon");
+    next.push("  claude   (or firstmate with crew-harness=claude once Phase 4 lands)");
     if (!which("claude")) next.push("  install Claude Code, then: hablo config  (Agent page) or re-run with --agent claude");
   }
   if (!flag("skip-firstmate")) {
