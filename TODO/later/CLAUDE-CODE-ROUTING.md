@@ -14,7 +14,7 @@
 - [x] `hablo.json`: add `agents.claude.settings.env` with the three variables
 - [x] `install.mjs` step 4b: merge the `env` block into `~/.claude/settings.json`, never overwrite
 - [x] `install.mjs` step 4b: write `BEDROUTER_API_KEY` into `~/.bedrouter/.env`
-- [x] SessionStart hook (`~/.hablo/claude/hooks/start-bedrouter.mjs`) starts bedrouter when the port is closed (full plugin marketplace is Phase 3)
+- [x] SessionStart hook (`~/.hablo/claude/hooks/start-bedrouter.mjs`) starts bedrouter when the port is closed (plugin `hooks.json` owns it as of Phase 3; settings SessionStart stripped on upgrade)
 - [ ] Verify a full tool-using turn end to end against a live Bedrock account
 - [ ] Measure the cost of no prompt caching on a real session, and record the number
 - [x] `README.md`: how to point Claude Code somewhere else, and how to undo it

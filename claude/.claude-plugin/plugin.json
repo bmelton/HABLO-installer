@@ -1,0 +1,8 @@
+{
+  "name": "hablo",
+  "version": "0.1.0",
+  "description": "HABLO Claude Code plugin: bedrouter routing hook, OpenWiki-first skill, shared agent profiles, ticket/review commands, Jira progress hooks",
+  "author": {
+    "name": "HABLO"
+  }
+}

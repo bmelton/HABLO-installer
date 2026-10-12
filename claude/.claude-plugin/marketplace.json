@@ -1,0 +1,13 @@
+{
+  "name": "hablo",
+  "owner": {
+    "name": "HABLO"
+  },
+  "plugins": [
+    {
+      "name": "hablo",
+      "source": ".",
+      "description": "HABLO: bedrouter SessionStart, OpenWiki skill, agent profiles, ticket/review commands, Jira progress hooks"
+    }
+  ]
+}

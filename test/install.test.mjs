@@ -168,15 +168,20 @@ test("agent selection writes marker, tags receipt, and refuses claude+oss ladder
   }
 });
 
-test("Claude routing merges settings.env, API key, and SessionStart without clobbering", () => {
+test("Claude routing merges settings.env and API key; strips Phase 2 SessionStart", () => {
   const f = fixture();
   try {
-    // Pre-existing operator key must be preserved.
+    // Pre-existing operator key must be preserved; Phase 2 HABLO SessionStart must be removed.
     const claudeDir = path.join(f.home, ".claude");
     fs.mkdirSync(claudeDir, { recursive: true });
     fs.writeFileSync(path.join(claudeDir, "settings.json"), JSON.stringify({
       env: { ANTHROPIC_MODEL: "keep-me" },
-      hooks: { SessionStart: [{ hooks: [{ type: "command", command: "echo operator" }] }] },
+      hooks: {
+        SessionStart: [
+          { hooks: [{ type: "command", command: "echo operator" }] },
+          { hooks: [{ type: "command", command: `node ${path.join(f.home, ".hablo", "claude", "hooks", "start-bedrouter.mjs")}` }] },
+        ],
+      },
     }, null, 2) + "\n");
 
     // Seed a global bedrouter so Claude-only does not need a real npm install.
@@ -193,6 +198,7 @@ exit 0
     assert.match(out, /\[4b\] Claude Code routing/);
     assert.match(out, /ANTHROPIC_BASE_URL/);
     assert.match(out, /claude settings\.env\.ANTHROPIC_MODEL already set/);
+    assert.match(out, /remove Phase 2 HABLO SessionStart/);
 
     const brEnv = fs.readFileSync(path.join(f.home, ".bedrouter", ".env"), "utf8");
     assert.match(brEnv, /^BEDROUTER_API_KEY=\S+/m);
@@ -202,19 +208,88 @@ exit 0
     assert.equal(settings.env.ANTHROPIC_MODEL, "keep-me");
     assert.equal(settings.env.ANTHROPIC_BASE_URL, "http://127.0.0.1:20129");
     assert.equal(settings.env.ANTHROPIC_AUTH_TOKEN, key);
-    assert.equal(settings.hooks.SessionStart.length, 2);
-    assert.match(JSON.stringify(settings.hooks.SessionStart), /start-bedrouter/);
+    assert.equal(settings.hooks.SessionStart.length, 1);
     assert.match(JSON.stringify(settings.hooks.SessionStart), /echo operator/);
+    assert.doesNotMatch(JSON.stringify(settings.hooks.SessionStart), /start-bedrouter/);
 
-    const hook = fs.readFileSync(path.join(f.home, ".hablo", "claude", "hooks", "start-bedrouter.mjs"), "utf8");
-    assert.match(hook, /20129/);
-    assert.doesNotMatch(hook, /__BEDROUTER_PORT__/);
+    // Default install() uses --skip-agents, so the plugin is not copied here.
+    assert.ok(!fs.existsSync(path.join(f.home, ".hablo", "claude", "hooks", "start-bedrouter.mjs")));
 
-    // Re-run is idempotent and does not duplicate the hook.
     install(f, ["--agent", "claude", "--skip-cli", "--skip-firstmate", "--skip-jira", "--skip-dream"]);
     const again = JSON.parse(fs.readFileSync(path.join(claudeDir, "settings.json"), "utf8"));
-    assert.equal(again.hooks.SessionStart.length, 2);
+    assert.equal(again.hooks.SessionStart.length, 1);
     assert.equal(again.env.ANTHROPIC_AUTH_TOKEN, key);
+  } finally {
+    fs.rmSync(f.dir, { recursive: true, force: true });
+  }
+});
+
+test("Claude plugin installs agents, marketplace, hooks; TDD skill only when interrogate on", () => {
+  const f = fixture();
+  try {
+    const brPkg = path.join(f.npmModules, "bedrouter", "dist");
+    fs.mkdirSync(brPkg, { recursive: true });
+    fs.writeFileSync(path.join(brPkg, "cli.js"), "#!/usr/bin/env node\nconsole.log('bedrouter stub');\n");
+    fs.writeFileSync(path.join(f.npmModules, "bedrouter", "package.json"), JSON.stringify({ name: "bedrouter", version: "0.10.0" }));
+    writeExecutable(path.join(f.fakeBin, "npm"), `#!/bin/sh
+if [ "$1" = root ] && [ "$2" = -g ]; then echo ${JSON.stringify(f.npmModules)}; exit 0; fi
+exit 0
+`);
+
+    const runClaude = (extra) => execFileSync(process.execPath, [
+      path.join(root, "install.mjs"),
+      "--profile", "",
+      "--agent", "claude",
+      "--skip-aws",
+      "--skip-probe",
+      "--skip-tools",
+      "--skip-cli",
+      "--skip-firstmate",
+      "--skip-jira",
+      "--skip-dream",
+      "--bin-dir", path.join(f.home, ".local", "bin"),
+      ...extra,
+    ], {
+      encoding: "utf8",
+      env: {
+        ...process.env,
+        HOME: f.home,
+        PI_CODING_AGENT_DIR: f.agentDir,
+        PATH: `${f.fakeBin}:${process.env.PATH}`,
+        HABLO_INTERROGATE_FIXTURE: path.join(root, "interrogate", "testdata", "upstream-skill"),
+      },
+    });
+
+    const out = runClaude(["--no-interrogate"]);
+    assert.match(out, /\[7\] agent profiles/);
+    assert.match(out, /register marketplace hablo/);
+    assert.match(out, /enable plugin hablo@hablo/);
+    assert.match(out, /Claude TDD skill omitted/);
+
+    const plugin = path.join(f.home, ".hablo", "claude");
+    assert.ok(fs.existsSync(path.join(plugin, ".claude-plugin", "plugin.json")));
+    assert.ok(fs.existsSync(path.join(plugin, "skills", "openwiki", "SKILL.md")));
+    assert.ok(fs.existsSync(path.join(plugin, "commands", "ticket.md")));
+    assert.ok(fs.existsSync(path.join(plugin, "agents", "implementer.md")));
+    assert.ok(fs.existsSync(path.join(plugin, "agents", "software-architect.md")));
+    assert.match(fs.readFileSync(path.join(plugin, "agents", "software-architect.md"), "utf8"), /^model: opus$/m);
+    assert.match(fs.readFileSync(path.join(plugin, "agents", "implementer.md"), "utf8"), /^model: sonnet$/m);
+    const hook = fs.readFileSync(path.join(plugin, "hooks", "start-bedrouter.mjs"), "utf8");
+    assert.match(hook, /20129/);
+    assert.doesNotMatch(hook, /__BEDROUTER_PORT__/);
+    assert.ok(fs.existsSync(path.join(plugin, "hooks", "progress.mjs")));
+    assert.ok(!fs.existsSync(path.join(plugin, "skills", "technical-design-doc")));
+
+    const settings = JSON.parse(fs.readFileSync(path.join(f.home, ".claude", "settings.json"), "utf8"));
+    assert.deepEqual(settings.extraKnownMarketplaces.hablo, { source: { source: "directory", path: plugin } });
+    assert.equal(settings.enabledPlugins["hablo@hablo"], true);
+
+    runClaude(["--interrogate"]);
+    assert.ok(fs.existsSync(path.join(plugin, "skills", "technical-design-doc", "SKILL.md")));
+    assert.match(fs.readFileSync(path.join(plugin, "skills", "technical-design-doc", "SKILL.md"), "utf8"), /HABLO overlay/);
+
+    runClaude(["--no-interrogate"]);
+    assert.ok(!fs.existsSync(path.join(plugin, "skills", "technical-design-doc")));
   } finally {
     fs.rmSync(f.dir, { recursive: true, force: true });
   }

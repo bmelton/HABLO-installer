@@ -41,18 +41,28 @@ Then: `pi --provider bedrouter --model auto`. For firstmate: `cd <your project> 
 | `--install-pi` | Install the Pi CLI via `https://pi.dev/install.sh` if `pi` is not on PATH; a no-op when it is. Uses Pi's managed layout under `~/.pi/agent/install` (pinned deps, `pi update`) so the CLI is not tied to the active nvm Node. If the symlink dir is not on PATH, the installer still finds `pi` for the rest of the run and prints the `export PATH=…` line to add to your shell rc |
 | `--install-claude` | When Claude is selected but missing from PATH, print an install reminder (native Claude Code installer) |
 
-### Claude Code → bedrouter
+### Claude Code → bedrouter + HABLO plugin
 
-With `--agent claude` or `both`, step **4b**:
+With `--agent claude` or `both`:
+
+**Step 4b** — routing env only:
 
 1. Ensures a generated `BEDROUTER_API_KEY` in `~/.bedrouter/.env` (shared secret; not in the manifest).
 2. Merges into `~/.claude/settings.json` (symlink-safe, **only missing keys**):
    - `ANTHROPIC_BASE_URL=http://127.0.0.1:<bedrouter.port>`
    - `ANTHROPIC_AUTH_TOKEN=<that key>`
    - `ANTHROPIC_MODEL=auto`
-3. Installs `~/.hablo/claude/hooks/start-bedrouter.mjs` and appends a `SessionStart` hook that starts bedrouter when the port is closed (never auto-stops it).
+3. Strips any Phase 2 HABLO `SessionStart` entry from settings (the plugin owns hooks now).
 
-**Undo:** remove those three `env` keys and the HABLO `SessionStart` entry from `~/.claude/settings.json`. Claude Code then uses its own auth again. Do not use `CLAUDE_CODE_USE_BEDROCK=1` as the HABLO path (escape hatch only).
+**Step 7** — HABLO plugin (skipped with `--skip-agents`):
+
+1. Copies `claude/` → `~/.hablo/claude` (agents rendered from `pi/agents/`, stamped SessionStart + progress hooks).
+2. Registers `extraKnownMarketplaces.hablo` (directory source) and enables `hablo@hablo`.
+3. OpenWiki skill always; TDD / `technical-design-doc` skill is added in step **10b** only when interrogate is enabled.
+
+Details: [`claude/README.md`](claude/README.md).
+
+**Undo:** remove the three `env` keys, `enabledPlugins["hablo@hablo"]`, and `extraKnownMarketplaces.hablo` from `~/.claude/settings.json`, then `rm -rf ~/.hablo/claude`. Do not use `CLAUDE_CODE_USE_BEDROCK=1` as the HABLO path (escape hatch only).
 | `--restore <tgz>` | Step 0: restore a `backup` archive (see below) |
 | `--force-restore` | Let the restore overwrite files that already exist |
 | `--default-model` | Make `bedrouter/auto` Pi's default model, not just the auto-selected one |

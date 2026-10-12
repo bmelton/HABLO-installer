@@ -4,22 +4,22 @@
 > [CLAUDE-CODE.md](CLAUDE-CODE.md). The unverified detail is whether a plugin can
 > carry workflow scripts; the fallback is written below.
 
-- [ ] Create `claude/` in this repository as the plugin source tree
-- [ ] Write `.claude-plugin/marketplace.json` and `.claude-plugin/plugin.json`
-- [ ] Split the six agent profiles into a shared body plus a per-harness front matter
-- [ ] Render `claude/agents/*.md` from the shared bodies
-- [ ] Write `claude/skills/openwiki/SKILL.md`
-- [ ] When interrogate is enabled: expose the pinned TDD / technical-design-doc skill to Claude (plugin `skills/` copy or install-time link to the same overlay Pi uses — one pin, two carriers)
-- [ ] Translate `pi/workflows/ticket.md` to a workflow script
-- [ ] Translate `pi/workflows/review-round.md` to a workflow script
-- [ ] Write `claude/commands/ticket.md` and `claude/commands/review-round.md`
-- [ ] Confirm whether a plugin loads `workflows/`; if not, install the scripts to `~/.claude/workflows/`
-- [ ] Progress hooks in `hooks/hooks.json`: after successful Bash/`git commit` and `gh pr create`, run `hablo-jira progress` / `pr-opened` (soft-fail; same markers as Pi)
-- [ ] `install.mjs` step 7: copy the plugin to `~/.hablo/claude`, register the marketplace, enable the plugin
-- [ ] `install.mjs` step 8: write the model notes into each agent's `model` field
-- [ ] Add `.hablo/claude` to `backup.config` in `hablo.json`
-- [ ] Test the whole tree with `claude --plugin-dir` before the installer touches settings
-- [ ] `README.md`: what the plugin installs and how to remove it
+- [x] Create `claude/` in this repository as the plugin source tree
+- [x] Write `.claude-plugin/marketplace.json` and `.claude-plugin/plugin.json`
+- [ ] Split the six agent profiles into a shared body plus a per-harness front matter (deferred: render from `pi/agents/` at install)
+- [x] Render `claude/agents/*.md` from Pi profiles (`claude/render-agents.mjs`)
+- [x] Write `claude/skills/openwiki/SKILL.md`
+- [x] When interrogate is enabled: expose the pinned TDD / technical-design-doc skill to Claude (plugin `skills/` copy — one pin, two carriers)
+- [ ] Translate `pi/workflows/ticket.md` to a workflow script (deferred; commands degrade inline)
+- [ ] Translate `pi/workflows/review-round.md` to a workflow script (deferred)
+- [x] Write `claude/commands/ticket.md` and `claude/commands/review-round.md`
+- [x] Confirm whether a plugin loads `workflows/`; if not, install the scripts to `~/.claude/workflows/` (unverified → commands-only degradation)
+- [x] Progress hooks in `hooks/hooks.json`: after successful Bash/`git commit` and `gh pr create`, run `hablo-jira progress` / `pr-opened` (soft-fail; same markers as Pi)
+- [x] `install.mjs` step 7: copy the plugin to `~/.hablo/claude`, register the marketplace, enable the plugin
+- [x] `install.mjs` step 8: write the model notes into each agent's `model` field (stamped in step 7 from explore/execute)
+- [x] Add `.hablo/claude` to `backup.config` in `hablo.json`
+- [ ] Test the whole tree with `claude --plugin-dir` before the installer touches settings (manual smoke)
+- [x] `README.md`: what the plugin installs and how to remove it
 
 ## What this is
 

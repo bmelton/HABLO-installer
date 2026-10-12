@@ -22,7 +22,7 @@
 //                    [--skip-dream] [--dream-at HH:MM] [--no-dream-service]
 //                    [--interrogate|--no-interrogate]   override interrogate.enabled for this install (captain policy)
 //                    [--install-pi]   install the Pi CLI via https://pi.dev/install.sh when it is missing
-//                    [--install-claude]   remind how to install Claude Code when it is missing (native installer; Phase 2 wires settings)
+//                    [--install-claude]   remind how to install Claude Code when it is missing (native installer)
 //
 // Steps (each prints what it did or would do):
 //   0 restore     with --restore <tgz>: put personal state back (never overwrites an existing file unless --force-restore)
@@ -33,8 +33,8 @@
 //                 including the team-stats publish block when the manifest names a repo
 //   5 aws         profile present? -> aws sso login; absent -> run `aws configure sso --profile <p>` (interactive)
 //   6 probe       probe each rung; try fallbacks, disable unavailable rungs, reconcile discoverable capabilities
-//   7 agents      agent profiles + workflows into ~/.pi (never overwrites without --force-agents)
-//   8 fit notes   pi-agents model notes into ~/.pi/agent/workflows.json
+//   7 agents      Pi profiles/workflows into ~/.pi; Claude plugin → ~/.hablo/claude + marketplace register
+//   8 fit notes   pi-agents model notes; Claude agent model fields from explore/execute rungs
 //   9 firstmate   clone/update kunchenguid/firstmate; crew harness = pi; crew-dispatch.json routing every crewmate
 //                 through bedrouter; captain.md branch, OpenWiki, and plain-language policies; optional config/backend
 //  10 cli         `hablo` + bedrouter shim + hablo-preflight + hablo-fleet-reset; captain/crewmate/tone/progress Pi extensions
@@ -52,6 +52,7 @@ import { fileURLToPath } from "node:url";
 import { runUninstall } from "./uninstall.mjs";
 import { materializeSkill } from "./interrogate/overlay.mjs";
 import { fetchSkillFiles, loadSkillFixture } from "./interrogate/fetch.mjs";
+import { renderClaudeAgent } from "./claude/render-agents.mjs";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const manifest = JSON.parse(fs.readFileSync(path.join(here, "hablo.json"), "utf8"));
@@ -456,7 +457,7 @@ applyInstallAgent();
     warn(tip);
   }
   if (wantsClaude) {
-    note("Claude Code: step 4b wires ~/.claude/settings.json → bedrouter; plugin assets and hablo Claude launch land in later phases");
+    note("Claude Code: step 4b wires settings.env → bedrouter; step 7 installs the HABLO plugin (agents, skills, hooks)");
   }
 }
 
@@ -842,13 +843,11 @@ if (!publishOn) {
 }
 
 // ---- 4b Claude Code → bedrouter --------------------------------------------------------------------------------------
-step("4b", "Claude Code routing (settings.env + SessionStart)");
+step("4b", "Claude Code routing (settings.env)");
 if (!wantsClaude) note("skipped (agent does not include claude)");
 else {
   const claudeManifest = manifest.agents?.claude ?? {};
   const claudeSettingsPath = expand(claudeManifest.settingsPath ?? "~/.claude/settings.json");
-  const hooksDir = expand(claudeManifest.hooksDir ?? path.join(habloHome, "claude", "hooks"));
-  const bedrouterBin = path.join(expand(opt("bin-dir", manifest.cli.binDir)), "bedrouter");
   const port = Number(manifest.bedrouter.port) || 20129;
   const autoModel = claudeManifest.autoModel ?? "auto";
 
@@ -887,28 +886,19 @@ else {
     } else note(`claude settings.env.${key} already set; left unchanged`);
   }
 
-  // SessionStart: start bedrouter when the port is closed. Never auto-stop.
-  const hookSrc = path.join(here, "claude", "hooks", "start-bedrouter.mjs");
-  const hookDst = path.join(hooksDir, "start-bedrouter.mjs");
-  if (!fs.existsSync(hookSrc)) fail(`missing ${hookSrc}`);
-  const hookBody = fs.readFileSync(hookSrc, "utf8")
-    .replace(/__BEDROUTER_PORT__/g, String(port))
-    .replace(/__BEDROUTER_HOME__/g, brHome)
-    .replace(/__HABLO_BEDROUTER_BIN__/g, bedrouterBin);
-  writeText(hookDst, hookBody);
-  if (!DRY && fs.existsSync(hookDst)) fs.chmodSync(hookDst, 0o755);
-  did(`install ${homePath(hookDst)}`);
-
-  const hookCmd = `node ${hookDst}`;
-  const habloHook = { hooks: [{ type: "command", command: hookCmd }] };
-  claudeSettings.hooks = claudeSettings.hooks && typeof claudeSettings.hooks === "object" ? claudeSettings.hooks : {};
-  const sessionStart = Array.isArray(claudeSettings.hooks.SessionStart) ? claudeSettings.hooks.SessionStart : [];
-  const already = sessionStart.some((entry) => JSON.stringify(entry).includes(hooksDir) || JSON.stringify(entry).includes("start-bedrouter"));
-  if (!already) {
-    claudeSettings.hooks.SessionStart = [...sessionStart, habloHook];
-    claudeActions.push({ kind: "json.set", path: homePath(claudeSettingsPath), key: "hooks.SessionStart", value: "(HABLO start-bedrouter)", prior: sessionStart.length ? "(prior hooks kept)" : null, priorPresent: sessionStart.length > 0 });
-    did(`append SessionStart hook → ${homePath(hookDst)}`);
-  } else note("SessionStart already includes HABLO start-bedrouter");
+  // Phase 3 plugin owns SessionStart via hooks/hooks.json. Strip the Phase 2 settings hook so it does not double-fire.
+  if (claudeSettings.hooks && typeof claudeSettings.hooks === "object") {
+    const sessionStart = Array.isArray(claudeSettings.hooks.SessionStart) ? claudeSettings.hooks.SessionStart : [];
+    const kept = sessionStart.filter((entry) => {
+      const s = JSON.stringify(entry);
+      return !s.includes("start-bedrouter") && !s.includes(".hablo/claude/hooks");
+    });
+    if (kept.length !== sessionStart.length) {
+      claudeSettings.hooks.SessionStart = kept;
+      claudeActions.push({ kind: "json.set", path: homePath(claudeSettingsPath), key: "hooks.SessionStart", value: "(removed HABLO; plugin owns SessionStart)", prior: "(HABLO start-bedrouter)", priorPresent: true });
+      did("remove Phase 2 HABLO SessionStart from settings (plugin hooks.json owns it)");
+    }
+  }
 
   if (claudeActions.length) {
     const text = JSON.stringify(claudeSettings, null, 2) + "\n";
@@ -918,8 +908,8 @@ else {
     recordMany(claudeActions);
   } else note(`${homePath(claudeSettingsPath)} Claude routing up to date`);
 
-  note("undo: remove ANTHROPIC_BASE_URL / ANTHROPIC_AUTH_TOKEN / ANTHROPIC_MODEL from env in ~/.claude/settings.json (and the HABLO SessionStart hook)");
-  note("native CLAUDE_CODE_USE_BEDROCK=1 is a manual escape hatch; HABLO does not set it");
+  note("undo: remove ANTHROPIC_BASE_URL / ANTHROPIC_AUTH_TOKEN / ANTHROPIC_MODEL from env in ~/.claude/settings.json");
+  note("SessionStart / progress hooks: HABLO plugin (step 7); native CLAUDE_CODE_USE_BEDROCK=1 is a manual escape hatch");
 }
 
 // ---- 5 aws ----------------------------------------------------------------------------------------------------------
@@ -1014,11 +1004,9 @@ function probeStep() {
   else note(`every enabled rung in ${cfgPath} is entitled on this account`);
 }
 
-// ---- 7 agents + workflows -------------------------------------------------------------------------------------------------
+// ---- 7 agents + workflows (+ Claude plugin) ------------------------------------------------------------------------------
 step(7, "agent profiles and workflows");
-if (!wantsPi) note("skipped (agent does not include pi)");
-else if (flag("skip-agents")) note("skipped (--skip-agents)");
-else {
+{
   const copyDir = (src, dst) => {
     if (!fs.existsSync(src)) return;
     for (const name of fs.readdirSync(src)) {
@@ -1029,34 +1017,126 @@ else {
       did(`${existed ? "overwrite" : "install"} ${path.relative(home, t)}`);
     }
   };
-  copyDir(path.join(here, "pi", "agents"), path.join(agentDir, "agents"));
-  copyDir(path.join(here, "pi", "workflows"), path.join(piDir, "workflows"));
+  if (!wantsPi) note("Pi agents/workflows skipped (agent does not include pi)");
+  else if (flag("skip-agents")) note("Pi agents/workflows skipped (--skip-agents)");
+  else {
+    copyDir(path.join(here, "pi", "agents"), path.join(agentDir, "agents"));
+    copyDir(path.join(here, "pi", "workflows"), path.join(piDir, "workflows"));
+  }
+
+  if (!wantsClaude) note("Claude plugin skipped (agent does not include claude)");
+  else if (flag("skip-agents")) note("Claude plugin skipped (--skip-agents)");
+  else {
+    const claudeManifest = manifest.agents?.claude ?? {};
+    const pluginRoot = expand(claudeManifest.marketplace ?? path.join(habloHome, "claude"));
+    const pluginName = claudeManifest.plugin ?? "hablo";
+    const marketplaceName = "hablo";
+    const claudeSettingsPath = expand(claudeManifest.settingsPath ?? "~/.claude/settings.json");
+    const bedrouterBin = path.join(expand(opt("bin-dir", manifest.cli.binDir)), "bedrouter");
+    const port = Number(manifest.bedrouter.port) || 20129;
+    const srcRoot = path.join(here, "claude");
+    if (!fs.existsSync(path.join(srcRoot, ".claude-plugin", "plugin.json"))) fail(`missing Claude plugin at ${srcRoot}`);
+
+    const stack = Array.isArray(cfg?.stack) ? cfg.stack : [];
+    // Claude Code model fields should be Anthropic aliases when present (Messages path); fall back to full stack.
+    const modelPool = stack.filter((r) => r.enabled && r.vendor === "anthropic");
+    const pool = modelPool.length ? modelPool : stack.filter((r) => r.enabled);
+    const exploreModel = [...pool].reverse().find((r) => r.serves?.includes("explore"))?.alias ?? "opus";
+    const executeModel = pool.find((r) => r.serves?.includes("execute") && r.serves?.includes("explore"))?.alias
+      ?? pool.find((r) => r.serves?.includes("execute"))?.alias
+      ?? "sonnet";
+
+    // Plugin tree is HABLO-owned (copied, not symlinked); always refresh so updates land without --force-agents.
+    const writePluginFile = (rel, body, mode) => {
+      const dst = path.join(pluginRoot, rel);
+      const existed = fs.existsSync(dst);
+      writeText(dst, body);
+      if (!DRY && mode && fs.existsSync(dst)) fs.chmodSync(dst, mode);
+      did(`${existed ? "update" : "install"} ${homePath(dst)}`);
+    };
+
+    // Manifest + static assets (always refresh: plugin is HABLO-owned).
+    for (const rel of [".claude-plugin/marketplace.json", ".claude-plugin/plugin.json", "hooks/hooks.json", "hooks/progress.mjs", "skills/openwiki/SKILL.md", "commands/ticket.md", "commands/review-round.md"]) {
+      const src = path.join(srcRoot, rel);
+      if (!fs.existsSync(src)) fail(`missing ${src}`);
+      writePluginFile(rel, fs.readFileSync(src, "utf8"), rel.endsWith(".mjs") ? 0o755 : undefined);
+    }
+
+    const hookSrc = path.join(srcRoot, "hooks", "start-bedrouter.mjs");
+    const hookBody = fs.readFileSync(hookSrc, "utf8")
+      .replace(/__BEDROUTER_PORT__/g, String(port))
+      .replace(/__BEDROUTER_HOME__/g, brHome)
+      .replace(/__HABLO_BEDROUTER_BIN__/g, bedrouterBin);
+    writePluginFile("hooks/start-bedrouter.mjs", hookBody, 0o755);
+
+    const agentsSrc = path.join(here, "pi", "agents");
+    for (const name of fs.readdirSync(agentsSrc).filter((n) => n.endsWith(".md"))) {
+      const { name: agent, markdown } = renderClaudeAgent(fs.readFileSync(path.join(agentsSrc, name), "utf8"), { exploreModel, executeModel });
+      writePluginFile(path.join("agents", `${agent}.md`), markdown);
+    }
+
+    note(`Claude plugin models: explore=${exploreModel}, execute=${executeModel}`);
+    note("Claude packages table: pi-bedrouter→settings.env+SessionStart hook; pi-openwiki-adapter→openwiki skill; pi-agents→plugin agents/commands; pi-web-access/vision→built-in; progress→plugin PostToolUse");
+
+    // Register marketplace + enable plugin (merge-only keys).
+    try { if (fs.lstatSync(claudeSettingsPath).isSymbolicLink()) note(`${homePath(claudeSettingsPath)} is a symlink: writing through the link`); } catch { /* absent */ }
+    const settingsExisted = fs.existsSync(claudeSettingsPath);
+    const settings = readJson(claudeSettingsPath, {});
+    if (typeof settings !== "object" || settings === null || Array.isArray(settings)) fail(`${claudeSettingsPath} is not a JSON object`);
+    const pluginActions = [];
+    settings.extraKnownMarketplaces = settings.extraKnownMarketplaces && typeof settings.extraKnownMarketplaces === "object" ? settings.extraKnownMarketplaces : {};
+    const wantMarket = { source: { source: "directory", path: pluginRoot } };
+    const curMarket = settings.extraKnownMarketplaces[marketplaceName];
+    if (JSON.stringify(curMarket) !== JSON.stringify(wantMarket)) {
+      pluginActions.push({ kind: "json.set", path: homePath(claudeSettingsPath), key: `extraKnownMarketplaces.${marketplaceName}`, value: wantMarket, prior: curMarket ?? null, priorPresent: curMarket !== undefined });
+      settings.extraKnownMarketplaces[marketplaceName] = wantMarket;
+      did(`register marketplace ${marketplaceName} → ${homePath(pluginRoot)}`);
+    } else note(`marketplace ${marketplaceName} already → ${homePath(pluginRoot)}`);
+    settings.enabledPlugins = settings.enabledPlugins && typeof settings.enabledPlugins === "object" ? settings.enabledPlugins : {};
+    const pluginKey = `${pluginName}@${marketplaceName}`;
+    if (settings.enabledPlugins[pluginKey] !== true) {
+      pluginActions.push({ kind: "json.set", path: homePath(claudeSettingsPath), key: `enabledPlugins.${pluginKey}`, value: true, prior: settings.enabledPlugins[pluginKey] ?? null, priorPresent: Object.hasOwn(settings.enabledPlugins, pluginKey) });
+      settings.enabledPlugins[pluginKey] = true;
+      did(`enable plugin ${pluginKey}`);
+    } else note(`plugin ${pluginKey} already enabled`);
+    if (pluginActions.length) {
+      const text = JSON.stringify(settings, null, 2) + "\n";
+      for (const a of pluginActions) a.sha256 = sha256(text);
+      writeJson(claudeSettingsPath, settings, { record: false });
+      if (!settingsExisted) record({ kind: "file.create", path: homePath(claudeSettingsPath), sha256: sha256(text) });
+      recordMany(pluginActions);
+    }
+    note(`undo plugin: remove enabledPlugins.${pluginKey} and extraKnownMarketplaces.${marketplaceName}; rm -rf ${homePath(pluginRoot)}`);
+  }
 }
 
 // ---- 8 fit notes ------------------------------------------------------------------------------------------------------------
-step(8, "pi-agents model notes");
-if (!wantsPi) note("skipped (agent does not include pi)");
+step(8, "model notes (Pi + Claude agents)");
+if (!wantsPi) note("Pi model notes skipped (agent does not include pi)");
 else {
-const wfPath = path.join(agentDir, "workflows.json");
-const wfExisted = fs.existsSync(wfPath);
-const wf = readJson(wfPath, {});
-const notes = { ...(wf.models ?? {}) };
-const noteActions = [];
-delete notes["bedrouter/auto-oss"];
-if (Object.hasOwn(wf.models ?? {}, "bedrouter/auto-oss")) noteActions.push({ kind: "json.delete", path: homePath(wfPath), key: "models.bedrouter/auto-oss", prior: wf.models["bedrouter/auto-oss"], priorPresent: true });
-notes["bedrouter/auto"] = "DEFAULT for every node: bedrouter picks the first eligible model serving the request class and escalates on failure";
-for (const r of cfg.stack.filter((r) => r.enabled)) notes[`bedrouter/${r.alias}`] = r.serves.includes("explore") ? "pin only for planning or final review; ordinary work should use bedrouter/auto" : r.serves.includes("execute") ? "pin only when a node must bypass routing; ordinary implementation should use bedrouter/auto" : "pin only for titles, summaries, or extraction";
-for (const [key, value] of Object.entries(notes)) if (wf.models?.[key] !== value) noteActions.push({ kind: "json.set", path: homePath(wfPath), key: `models.${key}`, value, prior: wf.models?.[key] ?? null, priorPresent: Object.hasOwn(wf.models ?? {}, key) });
-if (noteActions.length) {
-  const next = { ...wf, models: notes };
-  const nextText = JSON.stringify(next, null, 2) + "\n";
-  for (const action of noteActions) action.sha256 = sha256(nextText);
-  writeJson(wfPath, next, { record: false });
-  if (!wfExisted) record({ kind: "file.create", path: homePath(wfPath), sha256: sha256(nextText) });
-  recordMany(noteActions);
-  did(`write ${Object.keys(notes).length} model notes to ${wfPath}`);
-} else note("model notes up to date");
+  const wfPath = path.join(agentDir, "workflows.json");
+  const wfExisted = fs.existsSync(wfPath);
+  const wf = readJson(wfPath, {});
+  const notes = { ...(wf.models ?? {}) };
+  const noteActions = [];
+  delete notes["bedrouter/auto-oss"];
+  if (Object.hasOwn(wf.models ?? {}, "bedrouter/auto-oss")) noteActions.push({ kind: "json.delete", path: homePath(wfPath), key: "models.bedrouter/auto-oss", prior: wf.models["bedrouter/auto-oss"], priorPresent: true });
+  notes["bedrouter/auto"] = "DEFAULT for every node: bedrouter picks the first eligible model serving the request class and escalates on failure";
+  for (const r of (cfg?.stack ?? []).filter((r) => r.enabled)) notes[`bedrouter/${r.alias}`] = r.serves.includes("explore") ? "pin only for planning or final review; ordinary work should use bedrouter/auto" : r.serves.includes("execute") ? "pin only when a node must bypass routing; ordinary implementation should use bedrouter/auto" : "pin only for titles, summaries, or extraction";
+  for (const [key, value] of Object.entries(notes)) if (wf.models?.[key] !== value) noteActions.push({ kind: "json.set", path: homePath(wfPath), key: `models.${key}`, value, prior: wf.models?.[key] ?? null, priorPresent: Object.hasOwn(wf.models ?? {}, key) });
+  if (noteActions.length) {
+    const next = { ...wf, models: notes };
+    const nextText = JSON.stringify(next, null, 2) + "\n";
+    for (const action of noteActions) action.sha256 = sha256(nextText);
+    writeJson(wfPath, next, { record: false });
+    if (!wfExisted) record({ kind: "file.create", path: homePath(wfPath), sha256: sha256(nextText) });
+    recordMany(noteActions);
+    did(`write ${Object.keys(notes).length} model notes to ${wfPath}`);
+  } else note("Pi model notes up to date");
 }
+if (wantsClaude && !flag("skip-agents")) note("Claude agent model fields were stamped in step 7 from explore/execute rungs");
+else if (wantsClaude) note("Claude agent model stamp skipped (--skip-agents)");
+
 
 // ---- 9 firstmate --------------------------------------------------------------------------------------------------------------
 step(9, "firstmate (kunchenguid/firstmate)");
@@ -1267,9 +1347,12 @@ step("10b", "Interrogate TDD skill (pinned technical-design-doc)");
   const iq = manifest.interrogate ?? {};
   const pin = iq.skill ?? {};
   const skillDest = path.join(agentDir, "skills", "technical-design-doc");
+  const claudeManifest = manifest.agents?.claude ?? {};
+  const pluginRoot = expand(claudeManifest.marketplace ?? path.join(habloHome, "claude"));
+  const claudeSkillDest = path.join(pluginRoot, "skills", "technical-design-doc");
   const iqHome = path.join(habloHome, "interrogate");
   const runtimePath = path.join(habloHome, "interrogate.json");
-  if (!wantsPi) note("Pi skill tree skipped (agent does not include pi); Claude TDD skill lands with the plugin in Phase 3");
+  if (!wantsPi && !wantsClaude) note("skipped (neither pi nor claude selected)");
   else if (!pin.sha || !pin.repo || !pin.path) {
     note("skipped (interrogate.skill pin incomplete in hablo.json)");
   } else {
@@ -1291,7 +1374,7 @@ step("10b", "Interrogate TDD skill (pinned technical-design-doc)");
     writeJson(runtimePath, {
       enabled: iqEnabled,
       skill: { host: pin.host, repo: pin.repo, path: pin.path, sha: pin.sha },
-      skillDest: homePath(skillDest),
+      skillDest: wantsPi ? homePath(skillDest) : homePath(claudeSkillDest),
       updatedAt: new Date().toISOString(),
     });
     did(`render ${runtimePath} (enabled=${iqEnabled})`);
@@ -1306,31 +1389,58 @@ step("10b", "Interrogate TDD skill (pinned technical-design-doc)");
     } else {
       fetched = fetchSkillFiles(pin);
     }
-    if (!fetched.ok) {
-      if (fs.existsSync(path.join(skillDest, "SKILL.md"))) {
-        warn(`interrogate skill fetch failed (${fetched.error}); keeping previously installed skill at ${homePath(skillDest)}`);
-      } else {
-        warn(`interrogate skill fetch failed (${fetched.error}); install enterprise gh auth for ${pin.host} and re-run, or set HABLO_INTERROGATE_FIXTURE`);
+
+    const installSkillTree = (dest, label) => {
+      if (!fetched.ok) {
+        if (fs.existsSync(path.join(dest, "SKILL.md"))) {
+          warn(`interrogate skill fetch failed (${fetched.error}); keeping previously installed skill at ${homePath(dest)}`);
+        } else {
+          warn(`interrogate skill fetch failed (${fetched.error}); install enterprise gh auth for ${pin.host} and re-run, or set HABLO_INTERROGATE_FIXTURE`);
+        }
+        return;
       }
-    } else if (DRY) {
-      note(`would install skill at ${homePath(skillDest)} (pin ${pin.sha.slice(0, 12)}…)`);
-    } else {
-      fs.mkdirSync(skillDest, { recursive: true });
-      const priorSkill = fileState(path.join(skillDest, "SKILL.md"));
-      materializeSkill(skillDest, fetched.files, { mkdirSync: fs.mkdirSync.bind(fs), writeFileSync: fs.writeFileSync.bind(fs) });
-      // HABLO ADR template alongside upstream assets.
-      if (fs.existsSync(adrSrc)) fs.writeFileSync(path.join(skillDest, "assets", "adr-template.md"), fs.readFileSync(adrSrc));
-      const skillBody = fs.readFileSync(path.join(skillDest, "SKILL.md"));
+      if (DRY) {
+        note(`would install ${label} skill at ${homePath(dest)} (pin ${pin.sha.slice(0, 12)}…)`);
+        return;
+      }
+      fs.mkdirSync(dest, { recursive: true });
+      const priorSkill = fileState(path.join(dest, "SKILL.md"));
+      materializeSkill(dest, fetched.files, { mkdirSync: fs.mkdirSync.bind(fs), writeFileSync: fs.writeFileSync.bind(fs) });
+      if (label === "Claude") {
+        // Same pin/overlay; wording for Claude Code chat instead of Pi-only AskUserQuestion note.
+        const skillPath = path.join(dest, "SKILL.md");
+        let body = fs.readFileSync(skillPath, "utf8");
+        body = body.replace(/Ask in the Pi chat/g, "Ask in the chat");
+        body = body.replace(/Pi chat interview/g, "chat interview");
+        fs.writeFileSync(skillPath, body);
+      }
+      if (fs.existsSync(adrSrc)) {
+        fs.mkdirSync(path.join(dest, "assets"), { recursive: true });
+        fs.writeFileSync(path.join(dest, "assets", "adr-template.md"), fs.readFileSync(adrSrc));
+      }
+      const skillBody = fs.readFileSync(path.join(dest, "SKILL.md"));
       record({
         kind: priorSkill.exists ? "file.update" : "file.create",
-        path: homePath(path.join(skillDest, "SKILL.md")),
+        path: homePath(path.join(dest, "SKILL.md")),
         sha256: sha256(skillBody),
         skillSha: pin.sha,
         skillRepo: `${pin.host}/${pin.repo}`,
         ...(priorSkill.sha256 ? { priorSha256: priorSkill.sha256 } : {}),
       });
-      did(`install ${homePath(skillDest)} @ ${pin.sha.slice(0, 12)}…`);
-    }
+      did(`install ${homePath(dest)} @ ${pin.sha.slice(0, 12)}… (${label})`);
+    };
+
+    if (wantsPi) installSkillTree(skillDest, "Pi");
+    else note("Pi skill tree skipped (agent does not include pi)");
+
+    // Claude: expose the skill on the plugin only when interrogate is enabled (omit when off).
+    if (wantsClaude && !flag("skip-agents")) {
+      if (iqEnabled) installSkillTree(claudeSkillDest, "Claude");
+      else if (fs.existsSync(claudeSkillDest)) {
+        if (!DRY) fs.rmSync(claudeSkillDest, { recursive: true, force: true });
+        did(`remove ${homePath(claudeSkillDest)} (interrogate disabled)`);
+      } else note("Claude TDD skill omitted (interrogate disabled)");
+    } else if (wantsClaude) note("Claude TDD skill skipped (--skip-agents; plugin not installed)");
   }
 }
 
@@ -1534,7 +1644,7 @@ log(`\nDone${DRY ? " (dry run; nothing written)" : ""}${warnings.length ? ` with
     next.push("  in a repo with a wiki: /openwiki doctor");
   }
   if (wantsClaude) {
-    next.push("  Claude Code: ~/.claude/settings.json env → bedrouter; SessionStart starts the daemon");
+    next.push("  Claude Code: settings.env → bedrouter; HABLO plugin (~/.hablo/claude) owns SessionStart + progress");
     next.push("  claude   (or firstmate with crew-harness=claude once Phase 4 lands)");
     if (!which("claude")) next.push("  install Claude Code, then: hablo config  (Agent page) or re-run with --agent claude");
   }
