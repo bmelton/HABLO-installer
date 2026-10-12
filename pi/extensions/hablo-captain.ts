@@ -5,10 +5,43 @@
 // directory. When `hablo` starts Pi in a project directory instead, this extension appends firstmate's AGENTS.md to the
 // system prompt every turn, with the relative `bin/fm-*.sh` invocations rewritten to absolute paths under FM_ROOT, and
 // tells the captain which project this session is about. Nothing on disk is modified.
+//
+// Fleet footer: reads FM_HOME/state/home-summary.json plus each child's .status / .busy-state so the Pi status
+// line shows who is working, what they last reported, and a STALE hint when the status clock stops moving.
+import { execFile } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { formatFleetStatus } from "./hablo-fleet-status.mjs";
+
+type Theme = { fg: (color: string, text: string) => string };
+type Ui = { setStatus: (key: string, text: string) => void; theme: Theme; notify?: (msg: string, level?: string) => void };
+
+type HomeChild = {
+  id?: string;
+  kind?: string;
+  state?: string;
+  name?: string;
+  doing?: string;
+  source?: string;
+};
+
+type HomeSummary = {
+  state?: string;
+  generated_epoch?: number;
+  counts?: {
+    active_children?: number;
+    decisions_open?: number;
+    holds?: number;
+    queued?: number;
+  };
+  active_children?: HomeChild[];
+};
+
+const STALE_SECS = Math.max(60, Number(process.env.HABLO_FLEET_STALE_SECS || 600) || 600);
+const STATUS_MS = Math.max(5000, Number(process.env.HABLO_FLEET_STATUS_MS || 15000) || 15000);
+const SUMMARY_REFRESH_SECS = Math.max(30, Number(process.env.HABLO_FLEET_SUMMARY_REFRESH_SECS || 120) || 120);
 
 export default function (pi: ExtensionAPI) {
   const root = process.env.FM_ROOT_OVERRIDE || process.env.FM_ROOT;
@@ -17,6 +50,10 @@ export default function (pi: ExtensionAPI) {
   const name = process.env.HABLO_PROJECT_NAME || (project ? path.basename(project) : "");
   if (!root || !project) return; // launched some other way: stay inert
   const piExtensions = (process.env.HABLO_PI_EXTENSIONS || "").split(/\s+/).filter(Boolean);
+  const stateDir = path.join(home!, "state");
+  let statusTimer: ReturnType<typeof setInterval> | undefined;
+  let refreshingSummary = false;
+  let lastUi: Ui | undefined;
 
   const agentsFile = path.join(root, "AGENTS.md");
   const toneFile = path.join(process.env.HABLO_HOME || path.join(os.homedir(), ".hablo"), "tone.md");
@@ -44,6 +81,58 @@ export default function (pi: ExtensionAPI) {
     const id = ctx.model?.id;
     if (provider && id) return id.startsWith(`${provider}/`) ? id : `${provider}/${id}`;
     return process.env.HABLO_CREW_MODEL || undefined;
+  };
+
+  const readSummary = (): HomeSummary | null => {
+    try {
+      return JSON.parse(fs.readFileSync(path.join(stateDir, "home-summary.json"), "utf8")) as HomeSummary;
+    } catch {
+      return null;
+    }
+  };
+
+  const childDetails = (ids: string[]): Map<string, { lastStatus?: string; busy?: string; statusMtime?: number }> => {
+    const out = new Map<string, { lastStatus?: string; busy?: string; statusMtime?: number }>();
+    for (const id of ids) {
+      const row: { lastStatus?: string; busy?: string; statusMtime?: number } = {};
+      try {
+        const statusPath = path.join(stateDir, `${id}.status`);
+        const st = fs.statSync(statusPath);
+        row.statusMtime = Math.floor(st.mtimeMs / 1000);
+        const lines = fs.readFileSync(statusPath, "utf8").split("\n").filter((l) => l.trim());
+        row.lastStatus = lines[lines.length - 1];
+      } catch { /* no status yet */ }
+      try {
+        row.busy = fs.readFileSync(path.join(stateDir, `${id}.busy-state`), "utf8").trim();
+      } catch { /* idle / missing */ }
+      out.set(id, row);
+    }
+    return out;
+  };
+
+  const maybeRefreshSummary = (summary: HomeSummary | null, nowSecs: number) => {
+    const age = summary?.generated_epoch ? nowSecs - summary.generated_epoch : SUMMARY_REFRESH_SECS + 1;
+    if (age < SUMMARY_REFRESH_SECS || refreshingSummary) return;
+    const script = path.join(root!, "bin", "fm-home-summary-refresh.sh");
+    if (!fs.existsSync(script)) return;
+    refreshingSummary = true;
+    execFile(script, ["--best-effort"], {
+      env: { ...process.env, FM_HOME: home, FM_ROOT_OVERRIDE: root, FM_ROOT: root },
+      timeout: 55_000,
+    }, () => { refreshingSummary = false; });
+  };
+
+  const paintFleet = (ui: Ui) => {
+    lastUi = ui;
+    const nowSecs = Math.floor(Date.now() / 1000);
+    const summary = readSummary();
+    maybeRefreshSummary(summary, nowSecs);
+    const ids = (summary?.active_children || []).map((c) => c.id).filter((id): id is string => !!id);
+    const { text, level } = formatFleetStatus(name, summary, nowSecs, childDetails(ids), STALE_SECS);
+    const prefix = toneRule() ? "" : "⚓ ";
+    const color = level === "stale" ? "error" : level === "warn" ? "warning" : "accent";
+    const painted = typeof ui.theme?.fg === "function" ? ui.theme.fg(color, `${prefix}${text}`) : `${prefix}${text}`;
+    ui.setStatus("hablo", painted);
   };
 
   const preamble = (model?: string) => [
@@ -96,6 +185,7 @@ export default function (pi: ExtensionAPI) {
   ].join("\n");
 
   pi.on("before_agent_start", async (event, ctx) => {
+    if (ctx?.ui) paintFleet(ctx.ui as Ui);
     const manual = agentsMd();
     if (!manual) return;
     const tone = toneRule();
@@ -107,6 +197,12 @@ export default function (pi: ExtensionAPI) {
       ctx.ui.notify(`hablo: ${agentsFile} not found; this session is NOT a firstmate captain`, "error");
       return;
     }
-    ctx.ui.setStatus("hablo", ctx.ui.theme.fg("accent", `${toneRule() ? "" : "⚓ "}firstmate · ${name}`));
+    paintFleet(ctx.ui as Ui);
+    if (statusTimer) clearInterval(statusTimer);
+    statusTimer = setInterval(() => {
+      if (lastUi) paintFleet(lastUi);
+    }, STATUS_MS);
+    // Don't keep the event loop alive solely for the footer if everything else is idle.
+    statusTimer.unref?.();
   });
 }

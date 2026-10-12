@@ -116,6 +116,16 @@ test("captain policies keep Jira keys exact and distinct from OpenWiki", () => {
   assert.match(captain, /intent key must match/);
 });
 
+test("hablo-captain fleet footer imports status helper and refreshes on a timer", () => {
+  const captain = fs.readFileSync(path.join(root, "pi", "extensions", "hablo-captain.ts"), "utf8");
+  assert.match(captain, /hablo-fleet-status\.mjs/);
+  assert.match(captain, /formatFleetStatus/);
+  assert.match(captain, /paintFleet/);
+  assert.match(captain, /HABLO_FLEET_STALE_SECS/);
+  assert.match(captain, /setInterval/);
+  assert.ok(fs.existsSync(path.join(root, "pi", "extensions", "hablo-fleet-status.mjs")));
+});
+
 test("brief-include carries crewmate Jira reporting without delivery-contract lines", () => {
   const include = fs.readFileSync(path.join(root, "firstmate", "brief-include.md"), "utf8");
   assert.match(include, /HABLO:BRIEF-INCLUDE:START/);

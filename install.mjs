@@ -983,6 +983,8 @@ else {
   installFile(path.join(here, "bin", "hablo-preflight"), path.join(binDir, "hablo-preflight"), (t) => t, 0o755);
   installFile(path.join(here, "bin", "hablo-fleet-reset"), path.join(binDir, "hablo-fleet-reset"), (t) => t, 0o755);
   installFile(path.join(here, "pi", "extensions", "hablo-captain.ts"), path.join(habloHome, "hablo-captain.ts"), (t) => t, 0o644);
+  // Imported by hablo-captain for the fleet footer; must sit next to it under ~/.hablo/.
+  installFile(path.join(here, "pi", "extensions", "hablo-fleet-status.mjs"), path.join(habloHome, "hablo-fleet-status.mjs"), (t) => t, 0o644);
   // Global crewmate extension: crewmates launch as `pi -e <task.pi-ext.ts>` and skip the hablo wrapper, so this must live under ~/.pi/agent/extensions/.
   installFile(path.join(here, "pi", "extensions", "hablo-crewmate.ts"), path.join(agentDir, "extensions", "hablo-crewmate.ts"), (t) => t, 0o644);
   const tonePath = path.join(habloHome, "tone.md");

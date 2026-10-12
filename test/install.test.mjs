@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import crypto from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
@@ -84,10 +84,11 @@ function uninstall(f, extra = []) {
   });
 }
 
-function runInstalledHablo(f, args = [], env = {}) {
+function runInstalledHablo(f, args = [], env = {}, opts = {}) {
   const project = path.join(f.dir, "project");
   fs.mkdirSync(project, { recursive: true });
   if (!fs.existsSync(path.join(project, ".git"))) execFileSync("git", ["init", "--quiet", project]);
+  const cwd = opts.cwd ?? project;
   const calls = path.join(f.dir, "pi-call.json");
   fs.rmSync(calls, { force: true });
   writeExecutable(
@@ -97,28 +98,38 @@ function runInstalledHablo(f, args = [], env = {}) {
 printf '%s\\n' "$HABLO_CREW_MODEL" > ${JSON.stringify(calls)}
 printf '%s\\n' "$@" >> ${JSON.stringify(calls)}
 printf 'HABLO_PI_EXTENSIONS=%s\\n' "$HABLO_PI_EXTENSIONS" >> ${JSON.stringify(calls)}
+printf 'PWD=%s\\n' "$(pwd -P)" >> ${JSON.stringify(calls)}
 `,
   );
   // hablo's runtime picker only needs `node -v` / `pi --version` from PATH.
-  writeExecutable(path.join(f.fakeBin, "node"), "#!/bin/sh\n[ \"${1:-}\" = -v ] && { echo v22.19.0; exit 0; }\nexit 0\n");
-  try {
-    const stderr = execFileSync(path.join(f.home, ".local", "bin", "hablo"), args, {
-      cwd: project,
-      encoding: "utf8",
-      stdio: ["ignore", "pipe", "pipe"],
-      env: {
-        ...process.env,
-        HOME: f.home,
-        PI_CODING_AGENT_DIR: f.agentDir,
-        PATH: `${f.fakeBin}:${process.env.PATH}`,
-        HABLO_PREFLIGHT: "skip", // unit tests do not run a live bedrouter/SSO gate
-        ...env,
-      },
-    });
-    return { status: 0, stdout: stderr, stderr: "", call: fs.readFileSync(calls, "utf8") };
-  } catch (error) {
-    return { status: error.status, stdout: error.stdout?.toString() ?? "", stderr: error.stderr?.toString() ?? "", call: fs.existsSync(calls) ? fs.readFileSync(calls, "utf8") : "" };
-  }
+  // Forward other node invocations to the real binary (Herdr stamp / snapshot helpers).
+  const realNode = process.execPath;
+  writeExecutable(
+    path.join(f.fakeBin, "node"),
+    `#!/bin/sh
+[ "\${1:-}" = -v ] && { echo v22.19.0; exit 0; }
+exec ${JSON.stringify(realNode)} "$@"
+`,
+  );
+  const result = spawnSync(path.join(f.home, ".local", "bin", "hablo"), args, {
+    cwd,
+    encoding: "utf8",
+    env: {
+      ...process.env,
+      HOME: f.home,
+      PI_CODING_AGENT_DIR: f.agentDir,
+      PATH: `${f.fakeBin}:${process.env.PATH}`,
+      HABLO_PREFLIGHT: "skip", // unit tests do not run a live bedrouter/SSO gate
+      HABLO_HERDR_STAMP: "0", // do not reload a live Herdr server from unit tests
+      ...env,
+    },
+  });
+  return {
+    status: result.status ?? 1,
+    stdout: result.stdout?.toString() ?? "",
+    stderr: result.stderr?.toString() ?? "",
+    call: fs.existsSync(calls) ? fs.readFileSync(calls, "utf8") : "",
+  };
 }
 
 test("Wave 0 installs and disables tone policy while appending receipt runs", () => {
@@ -146,6 +157,8 @@ test("Wave 0 installs and disables tone policy while appending receipt runs", ()
     assert.ok(fs.existsSync(path.join(f.home, ".local", "bin", "hablo-preflight")));
     assert.ok(fs.existsSync(path.join(f.home, ".local", "bin", "hablo-fleet-reset")));
     assert.ok(fs.existsSync(path.join(f.home, ".hablo", "hablo-preflight")));
+    assert.ok(fs.existsSync(path.join(f.home, ".hablo", "hablo-captain.ts")));
+    assert.ok(fs.existsSync(path.join(f.home, ".hablo", "hablo-fleet-status.mjs")));
     assert.ok(fs.existsSync(path.join(f.home, ".local", "bin", "hablo-jira")), installOutput);
     assert.ok(fs.existsSync(path.join(f.home, ".local", "bin", "hablo-jira-agent")), installOutput);
     assert.ok(fs.existsSync(path.join(f.home, ".local", "bin", "hablo-dream")), installOutput);
@@ -256,6 +269,44 @@ test("hablo resolves one captain/crew model and refuses an ambiguous bare model"
     const full = runInstalledHablo(f, ["--model", "openai-codex/gpt-5.3-codex"]);
     assert.equal(full.status, 0);
     assert.match(full.call, /^openai-codex\/gpt-5\.3-codex/m);
+  } finally {
+    fs.rmSync(f.dir, { recursive: true, force: true });
+  }
+});
+
+test("hablo remembers the project and recovers from a non-git cwd without pinning a repo name", () => {
+  const f = fixture();
+  try {
+    install(f);
+    const fromRepo = runInstalledHablo(f);
+    assert.equal(fromRepo.status, 0, fromRepo.stderr);
+    const project = fs.realpathSync(path.join(f.dir, "project"));
+    assert.equal(fs.readFileSync(path.join(f.home, ".hablo", "last-project"), "utf8").trim(), project);
+    assert.match(fromRepo.call, new RegExp(`^PWD=${project.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`, "m"));
+
+    const home = f.home;
+    const fromHome = runInstalledHablo(f, [], {}, { cwd: home });
+    assert.equal(fromHome.status, 0, fromHome.stderr);
+    assert.match(fromHome.stderr + fromHome.stdout, /last-project/);
+    assert.match(fromHome.call, new RegExp(`^PWD=${project.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`, "m"));
+
+    const other = path.join(f.dir, "other-repo");
+    fs.mkdirSync(other, { recursive: true });
+    execFileSync("git", ["init", "--quiet", other]);
+    const viaArg = runInstalledHablo(f, [other], {}, { cwd: home });
+    assert.equal(viaArg.status, 0, viaArg.stderr);
+    assert.equal(fs.readFileSync(path.join(f.home, ".hablo", "last-project"), "utf8").trim(), fs.realpathSync(other));
+
+    const cfg = path.join(f.home, ".config", "herdr", "config.toml");
+    fs.mkdirSync(path.dirname(cfg), { recursive: true });
+    fs.writeFileSync(cfg, "onboarding = false\n\n[ui]\nstatus_indicators = \"symbols\"\n");
+    writeExecutable(path.join(f.fakeBin, "herdr"), "#!/bin/sh\nexit 0\n");
+    const stamped = runInstalledHablo(f, [], { HABLO_HERDR_STAMP: "1", HERDR_CONFIG: cfg }, { cwd: project });
+    assert.equal(stamped.status, 0, stamped.stderr);
+    const toml = fs.readFileSync(cfg, "utf8");
+    assert.match(toml, /\[terminal\]/);
+    assert.match(toml, new RegExp(`new_cwd = ${JSON.stringify(project).replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`));
+    assert.match(toml, /status_indicators = "symbols"/);
   } finally {
     fs.rmSync(f.dir, { recursive: true, force: true });
   }

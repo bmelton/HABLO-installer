@@ -3,7 +3,14 @@
 # managed by HABLO-installer (bin/hablo in that repo is the source; re-running the installer refreshes this copy).
 #
 #   cd ~/code/myproject && hablo [pi options...]
+#   hablo ~/code/myproject [pi options...]   optional project path when the shell cwd is not the repo
 #   hablo update [--check]   move to the newest HABLO release and re-install it (--check only shows the plan)
+#
+# Project directory: prefer the path you pass or the directory you launch from. If that is not a git repo
+# (common when a Herdr session was seeded at $HOME), fall back to the focused Herdr pane's cwd, then to
+# ~/.hablo/last-project. A successful launch remembers the project and, when Herdr is installed, sets
+# [terminal].new_cwd in ~/.config/herdr/config.toml so new panes/workspaces open there without --cwd
+# (disable with HABLO_HERDR_STAMP=0). Nothing is pinned to a specific repository name.
 #
 # firstmate normally wants to be launched from its own checkout, because the harness discovers AGENTS.md and
 # .pi/extensions from the working directory. This wrapper keeps firstmate's code and home where they are and points
@@ -34,7 +41,8 @@ usage() {
   echo "env: FM_ROOT (firstmate checkout), FM_HOME (firstmate home, default FM_ROOT), HABLO_PROJECT_MODE (default direct-PR),"
   echo "     HABLO_PROVIDER / HABLO_MODEL (default $PROVIDER / $MODEL),"
   echo "     HABLO_PI (absolute pi binary), HABLO_MIN_PI_VERSION / HABLO_MIN_NODE_VERSION (runtime floor),"
-  echo "     HABLO_PREFLIGHT=skip|soft (SSO/model gate)"
+  echo "     HABLO_PREFLIGHT=skip|soft (SSO/model gate),"
+  echo "     HABLO_HERDR_STAMP=0 (do not update Herdr new_cwd after a successful launch)"
 }
 case "${1:-}" in
   -h|--help|help) usage; exit 0;;
@@ -145,7 +153,104 @@ PI_VER="$(pi_version_of "$PI_BIN" || echo unknown)"
 NODE_VER="$(node -v 2>/dev/null || echo unknown)"
 echo "hablo: runtime  pi $PI_VER ($PI_BIN) on node $NODE_VER" >&2
 
-proj="$(pwd -P)"
+is_git_root() {
+  [ -n "${1:-}" ] && git -C "$1" rev-parse --show-toplevel >/dev/null 2>&1
+}
+
+git_toplevel() {
+  git -C "$1" rev-parse --show-toplevel 2>/dev/null
+}
+
+herdr_focused_cwd() {
+  # Only when running inside a Herdr pane — a background session's focused cwd must
+  # not hijack an unrelated outer-shell `hablo` invocation.
+  [ "${HERDR_ENV:-}" = 1 ] || return 1
+  command -v herdr >/dev/null 2>&1 || return 1
+  herdr api snapshot 2>/dev/null | node -e '
+    let s=""; process.stdin.on("data",d=>s+=d); process.stdin.on("end",()=>{
+      try {
+        const j=JSON.parse(s);
+        const snap=j.result&&j.result.snapshot||j.snapshot||j;
+        const panes=snap.panes||[];
+        const focused=panes.find(p=>p.focused)||panes.find(p=>p.pane_id===snap.focused_pane_id);
+        const cwd=(focused&&(focused.foreground_cwd||focused.cwd))||"";
+        if (cwd) process.stdout.write(cwd);
+      } catch {}
+    });
+  ' 2>/dev/null
+}
+
+stamp_herdr_new_cwd() {
+  # Remember the project for Herdr's durable new_cwd (not a HABLO-pinned repo name).
+  local proj_path="$1"
+  local cfg="${HERDR_CONFIG:-$HOME/.config/herdr/config.toml}"
+  [ "${HABLO_HERDR_STAMP:-1}" = 0 ] && return 0
+  command -v herdr >/dev/null 2>&1 || return 0
+  mkdir -p "$(dirname "$cfg")"
+  HERDR_CONFIG="$cfg" HABLO_STAMP_CWD="$proj_path" node -e '
+    const fs = require("fs");
+    const path = require("path");
+    const cfg = process.env.HERDR_CONFIG;
+    const cwd = process.env.HABLO_STAMP_CWD;
+    const line = "new_cwd = " + JSON.stringify(cwd);
+    let text = "";
+    try { text = fs.readFileSync(cfg, "utf8"); } catch {}
+    const lines = text.split(/\n/);
+    let start = -1, end = lines.length;
+    for (let i = 0; i < lines.length; i++) {
+      if (/^\[terminal\]\s*$/.test(lines[i])) start = i;
+      else if (start >= 0 && /^\[[^\]]+\]\s*$/.test(lines[i])) { end = i; break; }
+    }
+    if (start < 0) {
+      while (lines.length && lines[lines.length - 1] === "") lines.pop();
+      if (lines.length) lines.push("");
+      lines.push("[terminal]", line, "");
+    } else {
+      let replaced = false;
+      for (let i = start + 1; i < end; i++) {
+        if (/^new_cwd\s*=/.test(lines[i])) { lines[i] = line; replaced = true; break; }
+      }
+      if (!replaced) lines.splice(start + 1, 0, line);
+    }
+    let next = lines.join("\n");
+    if (!next.endsWith("\n")) next += "\n";
+    fs.mkdirSync(path.dirname(cfg), { recursive: true });
+    fs.writeFileSync(cfg, next);
+  ' || return 0
+  herdr server reload-config >/dev/null 2>&1 || true
+  echo "hablo: herdr   new_cwd -> $proj_path (new panes/workspaces inherit this; HABLO_HERDR_STAMP=0 to skip)" >&2
+}
+
+# Optional project path as the first non-option argument (so Herdr $HOME shells can still launch cleanly).
+proj_arg=""
+if [ "$#" -ge 1 ]; then
+  case "$1" in
+    -*|update) ;;
+    *)
+      if [ -d "$1" ]; then
+        proj_arg="$(cd "$1" && pwd -P)"
+        shift
+      fi
+      ;;
+  esac
+fi
+
+proj="${proj_arg:-$(pwd -P)}"
+proj_source="cwd"
+if ! is_git_root "$proj"; then
+  herdr_cwd="$(herdr_focused_cwd || true)"
+  if [ -n "$herdr_cwd" ] && is_git_root "$herdr_cwd"; then
+    proj="$(cd "$herdr_cwd" && pwd -P)"
+    proj_source="herdr-focused"
+  elif [ -f "$HABLO_HOME/last-project" ]; then
+    last="$(tr -d '\n' < "$HABLO_HOME/last-project" 2>/dev/null || true)"
+    if [ -n "$last" ] && is_git_root "$last"; then
+      proj="$(cd "$last" && pwd -P)"
+      proj_source="last-project"
+    fi
+  fi
+fi
+
 root_real="$(cd "$FM_ROOT" && pwd -P)"
 export FM_ROOT_OVERRIDE="$root_real"
 export FM_HOME="${FM_HOME:-$root_real}"
@@ -227,10 +332,24 @@ fi
 # Standing in the firstmate checkout itself: plain firstmate, its own discovery does the rest.
 if [ "$proj" = "$root_real" ]; then exec "$PI_BIN" "$@"; fi
 
-git -C "$proj" rev-parse --show-toplevel >/dev/null 2>&1 || { echo "hablo: $proj is not a git repository; firstmate works on git projects (worktrees, branches, PRs)" >&2; exit 1; }
-top="$(git -C "$proj" rev-parse --show-toplevel)"
-if [ "$top" != "$proj" ]; then echo "hablo: using the repository root $top" >&2; proj="$top"; cd "$proj"; fi
+if ! is_git_root "$proj"; then
+  echo "hablo: $(pwd -P) is not a git repository; firstmate works on git projects (worktrees, branches, PRs)." >&2
+  echo "       cd into a project and run hablo once (or: hablo /path/to/repo). That path is remembered" >&2
+  echo "       in $HABLO_HOME/last-project and, when Herdr is present, becomes [terminal].new_cwd so" >&2
+  echo "       new panes open there without workspace create --cwd." >&2
+  exit 1
+fi
+top="$(git_toplevel "$proj")"
+if [ "$top" != "$proj" ]; then echo "hablo: using the repository root $top" >&2; proj="$top"; fi
+if [ "$proj_source" != cwd ] || [ "$(pwd -P)" != "$proj" ]; then
+  echo "hablo: project $proj (via $proj_source)" >&2
+fi
+cd "$proj"
 name="$(basename "$proj")"
+# Durable defaults for the next shell/Herdr pane — still the folder you launched for, never a hard-coded repo.
+mkdir -p "$HABLO_HOME"
+printf '%s\n' "$proj" > "$HABLO_HOME/last-project"
+stamp_herdr_new_cwd "$proj"
 
 mkdir -p "$FM_HOME/data" "$FM_HOME/projects"
 reg="$FM_HOME/data/projects.md"
