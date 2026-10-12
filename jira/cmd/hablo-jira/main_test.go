@@ -154,6 +154,116 @@ func TestCreateAssignsSelfAndSprint(t *testing.T) {
 	}
 }
 
+func TestProgressDedupeByCommitSHA(t *testing.T) {
+	var posted string
+	posts := 0
+	s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == "GET" && r.URL.Path == "/rest/api/3/issue/HABLO-1/comment":
+			comments := []any{}
+			if posted != "" {
+				comments = []any{map[string]any{"body": map[string]any{
+					"type": "doc", "version": 1,
+					"content": []any{map[string]any{"type": "paragraph", "content": []any{map[string]any{"type": "text", "text": posted}}}},
+				}}}
+			}
+			json.NewEncoder(w).Encode(map[string]any{"comments": comments})
+		case r.Method == "POST" && r.URL.Path == "/rest/api/3/issue/HABLO-1/comment":
+			var x map[string]any
+			json.NewDecoder(r.Body).Decode(&x)
+			posted = "hablo: progress commit=abcdef1234567"
+			posts++
+			w.WriteHeader(201)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer s.Close()
+	cfg := fixtureConfig(t, s.URL)
+	args := []string{"progress", "--config", cfg, "--key", "HABLO-1", "--commit", "abcdef1234567", "--message", "landed the fix", "--quiet"}
+	var out bytes.Buffer
+	if code := run(args, &out, &out); code != 0 {
+		t.Fatalf("first code=%d: %s", code, out.String())
+	}
+	if code := run(args, &out, &out); code != 0 {
+		t.Fatalf("second code=%d: %s", code, out.String())
+	}
+	if posts != 1 {
+		t.Fatalf("posts=%d", posts)
+	}
+}
+
+func TestPROpenedCommentsAndTransitions(t *testing.T) {
+	posts, transitions := 0, 0
+	s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == "GET" && r.URL.Path == "/rest/api/3/issue/HABLO-1/comment":
+			json.NewEncoder(w).Encode(map[string]any{"comments": []any{}})
+		case r.Method == "POST" && r.URL.Path == "/rest/api/3/issue/HABLO-1/comment":
+			posts++
+			w.WriteHeader(201)
+		case r.Method == "GET" && r.URL.Path == "/rest/api/3/issue/HABLO-1/transitions":
+			json.NewEncoder(w).Encode(map[string]any{"transitions": []any{
+				map[string]any{"id": "3", "name": "Start review", "to": map[string]any{"name": "In Review", "statusCategory": map[string]any{"key": "indeterminate"}}},
+			}})
+		case r.Method == "POST" && r.URL.Path == "/rest/api/3/issue/HABLO-1/transitions":
+			transitions++
+			w.WriteHeader(204)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer s.Close()
+	cfg := fixtureConfig(t, s.URL)
+	var out bytes.Buffer
+	args := []string{"pr-opened", "--config", cfg, "--key", "HABLO-1", "--pr", "https://github.com/org/repo/pull/9", "--quiet"}
+	if code := run(args, &out, &out); code != 0 {
+		t.Fatalf("code=%d: %s", code, out.String())
+	}
+	if posts != 1 || transitions != 1 {
+		t.Fatalf("posts=%d transitions=%d", posts, transitions)
+	}
+	// Second call: comment already present (simulate via server state) — use marker in GET.
+	posts, transitions = 0, 0
+	s2 := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == "GET" && r.URL.Path == "/rest/api/3/issue/HABLO-1/comment":
+			body := map[string]any{
+				"type": "doc", "version": 1,
+				"content": []any{map[string]any{
+					"type": "paragraph",
+					"content": []any{map[string]any{
+						"type": "text",
+						"text": "hablo: pr-opened url=https://github.com/org/repo/pull/9",
+					}},
+				}},
+			}
+			json.NewEncoder(w).Encode(map[string]any{"comments": []any{map[string]any{"body": body}}})
+		case r.Method == "POST":
+			t.Fatalf("unexpected write %s %s", r.Method, r.URL.Path)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer s2.Close()
+	cfg2 := fixtureConfig(t, s2.URL)
+	if code := run([]string{"pr-opened", "--config", cfg2, "--key", "HABLO-1", "--pr", "https://github.com/org/repo/pull/9/", "--quiet"}, &out, &out); code != 0 {
+		t.Fatalf("dedupe code=%d: %s", code, out.String())
+	}
+}
+
+func TestKeyFromBranch(t *testing.T) {
+	if got := keyFromBranch("HABLO-12"); got != "HABLO-12" {
+		t.Fatalf("exact: %q", got)
+	}
+	if got := keyFromBranch("feat/HABLO-12-progress"); got != "HABLO-12" {
+		t.Fatalf("prefix: %q", got)
+	}
+	if got := keyFromBranch("main"); got != "" {
+		t.Fatalf("none: %q", got)
+	}
+}
+
 func TestCreateWarnsAndLabelsReady(t *testing.T) {
 	var created map[string]any
 	s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

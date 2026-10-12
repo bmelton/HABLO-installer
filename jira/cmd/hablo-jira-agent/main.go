@@ -320,11 +320,70 @@ func (a app) reap(ctx context.Context, s *state.State) error {
 		if x := a.client.AddComment(ctx, key, "HABLO run "+outcome+": "+reason); x != nil {
 			return x
 		}
+		if reportErr == nil && r.PR != "" {
+			if x := a.ensurePROpened(ctx, key, r.PR); x != nil {
+				fmt.Fprintf(a.out, "note: pr backfill for %s: %v\n", key, x)
+			}
+		}
 		e.Status = outcome
 		e.LastOutcome = reason
 		s.Issues[key] = e
 	}
 	return nil
+}
+
+// ensurePROpened is a safety net when the Pi progress hook missed a PR: comment with the URL (deduped) and move to
+// in-review when that status is mapped. Soft for the caller — a backfill miss must not strand label updates.
+func (a app) ensurePROpened(ctx context.Context, key, pr string) error {
+	url := strings.TrimRight(strings.TrimSpace(pr), "/")
+	if url == "" || !strings.Contains(url, "://") {
+		return fmt.Errorf("invalid pr url")
+	}
+	marker := "hablo: pr-opened url=" + url
+	if a.cfg.Reporting.Enabled {
+		recent, e := a.client.RecentComments(ctx, key, 50)
+		if e != nil {
+			return e
+		}
+		for _, c := range recent {
+			if strings.Contains(adf.Markdown(c.Body), marker) {
+				return nil // hook (or a prior backfill) already recorded this PR
+			}
+		}
+		text := fmt.Sprintf("## HABLO: pr-opened\n\nPull request: %s\n\n%s", url, marker)
+		if e := a.client.AddComment(ctx, key, text); e != nil {
+			return e
+		}
+	}
+	if !a.cfg.Reporting.Transitions {
+		return nil
+	}
+	p, ok := a.cfg.ProjectFor(key)
+	if !ok {
+		return fmt.Errorf("project not mapped")
+	}
+	name := p.Statuses["inReview"]
+	if name == "" {
+		return fmt.Errorf("no mapped in-review status")
+	}
+	ts, e := a.client.Transitions(ctx, key)
+	if e != nil {
+		return e
+	}
+	found := ""
+	for _, t := range ts {
+		if strings.EqualFold(t.To.Name, name) || strings.EqualFold(t.Name, name) {
+			if strings.EqualFold(t.To.StatusCategory.Key, "done") {
+				return fmt.Errorf("refusing transition into Done category")
+			}
+			found = t.ID
+			break
+		}
+	}
+	if found == "" {
+		return fmt.Errorf("transition %q is not available", name)
+	}
+	return a.client.Transition(ctx, key, found)
 }
 func (a app) status() error {
 	s, e := state.Load(a.cfg.Home)

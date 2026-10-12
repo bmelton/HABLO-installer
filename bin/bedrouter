@@ -1,0 +1,46 @@
+#!/usr/bin/env bash
+# bedrouter: HABLO wrapper for the nested bedrouter CLI (from pi-bedrouter / npm:bedrouter).
+# managed by HABLO-installer (bin/bedrouter in that repo is the source; re-running the installer refreshes this copy).
+#
+# Points at ~/.bedrouter for config and credentials so `bedrouter doctor` / `serve` / `report` work from any cwd,
+# matching how pi-bedrouter launches the daemon. Existing BEDROUTER_* / AWS_* env vars still win.
+#
+#   bedrouter doctor --probe
+#   bedrouter serve
+#   bedrouter report
+#
+# Bash 3.2 compatible (macOS); works on Linux and WSL. Nothing here needs root.
+set -eu
+
+BR_HOME="${BEDROUTER_HOME:-__BEDROUTER_HOME__}"
+AGENT_DIR="${PI_CODING_AGENT_DIR:-__PI_AGENT_DIR__}"
+STAMPED_CLI="__BEDROUTER_CLI__"
+
+export BEDROUTER_ENV="${BEDROUTER_ENV:-$BR_HOME/.env}"
+export BEDROUTER_CONFIG="${BEDROUTER_CONFIG:-$BR_HOME/bedrouter.json}"
+
+cli=""
+for c in \
+  "$STAMPED_CLI" \
+  "$AGENT_DIR/npm/node_modules/bedrouter/dist/cli.js" \
+  "$AGENT_DIR/npm/node_modules/pi-bedrouter/node_modules/bedrouter/dist/cli.js"
+do
+  # An unstamped __BEDROUTER_CLI__ sentinel is not a real file, so -f skips it safely.
+  [ -n "$c" ] && [ -f "$c" ] || continue
+  cli="$c"
+  break
+done
+
+if [ -z "$cli" ]; then
+  echo "bedrouter: CLI not found (re-run the HABLO installer, or: pi install npm:pi-bedrouter)" >&2
+  exit 1
+fi
+
+if [ ! -f "$BEDROUTER_CONFIG" ]; then
+  echo "bedrouter: config missing at $BEDROUTER_CONFIG (re-run the HABLO installer)" >&2
+  exit 1
+fi
+
+# Match pi-bedrouter: relative fallbacks and any log paths that assume the home directory.
+cd "$BR_HOME"
+exec node "$cli" "$@"

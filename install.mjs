@@ -36,7 +36,7 @@
 //   8 fit notes   pi-agents model notes into ~/.pi/agent/workflows.json
 //   9 firstmate   clone/update kunchenguid/firstmate; crew harness = pi; crew-dispatch.json routing every crewmate
 //                 through bedrouter; captain.md branch, OpenWiki, and plain-language policies; optional config/backend
-//  10 cli         `hablo` + hablo-preflight + hablo-fleet-reset; captain/crewmate/tone Pi extensions
+//  10 cli         `hablo` + bedrouter shim + hablo-preflight + hablo-fleet-reset; captain/crewmate/tone/progress Pi extensions
 //  11 tools       firstmate's tool dependencies: npm -g gh-axi chrome-devtools-axi lavish-axi tasks-axi quota-axi;
 //                 treehouse and no-mistakes via their install scripts into ~/.local/bin (no sudo)
 //  13 jira        build the reporting CLI and dispatch agent, render config, install and start the user scheduler
@@ -760,7 +760,11 @@ step(6, "entitlement probe (which rungs this account can invoke)");
 if (flag("skip-probe") || DRY) note(DRY ? "skipped in dry run" : "skipped (--skip-probe)");
 else probeStep();
 function probeStep() {
-  const probe = () => run(process.execPath, [brCli, "doctor", "--probe"], { cwd: brHome, env: { BEDROUTER_CONFIG: cfgPath }, timeout: 180_000 });
+  const probe = () => run(process.execPath, [brCli, "doctor", "--probe"], {
+    cwd: brHome,
+    env: { BEDROUTER_CONFIG: cfgPath, BEDROUTER_ENV: envPath },
+    timeout: 180_000,
+  });
   let out = probe();
   if (!/^probe:/m.test(out.stdout ?? "")) { note((out.stdout || out.stderr || "").trim().split("\n").slice(0, 4).join("\n  ")); warn("entitlement probe did not run (no valid AWS credentials?); fix step 5 and re-run, or pass --skip-probe"); return; }
   const denied = () => [...(out.stdout ?? "").matchAll(/^\s+DENIED\s+(\S+)\s+(\S+)/gm)].map((m) => ({ alias: m[1], id: m[2] }));
@@ -990,19 +994,27 @@ step(10, "hablo command (firstmate from any project directory)");
 const cli = manifest.cli;
 const binDir = expand(opt("bin-dir", cli.binDir));
 const habloHome = expand(cli.home);
-if (flag("skip-cli") || flag("skip-firstmate")) note(`skipped (${flag("skip-cli") ? "--skip-cli" : "--skip-firstmate: the wrapper needs the firstmate checkout"})`);
+// Copied, not symlinked: wrappers must keep working if this installer checkout moves or goes away.
+const installFile = (src, dst, transform, mode) => {
+  const next = transform(fs.readFileSync(src, "utf8"));
+  const cur = fs.existsSync(dst) ? fs.readFileSync(dst, "utf8") : null;
+  if (cur === next) { note(`${path.relative(home, dst)} up to date`); return; }
+  if (cur !== null && !/HABLO-installer/.test(cur)) { note(`${path.relative(home, dst)} exists and was not written by this installer; leaving it`); return; }
+  writeText(dst, next);
+  if (!DRY) fs.chmodSync(dst, mode);
+  did(`${cur === null ? "install" : "update"} ${path.relative(home, dst)}`);
+};
+// PATH shim for the nested bedrouter CLI: pins ~/.bedrouter env/config so doctor/serve work from any cwd.
+// Independent of firstmate/`hablo` — bedrouter users still get a working shell command.
+if (typeof brCli === "string" && brCli) {
+  installFile(path.join(here, "bin", "bedrouter"), path.join(binDir, "bedrouter"), (t) => t
+    .replace(/__BEDROUTER_HOME__/g, brHome)
+    .replace(/__PI_AGENT_DIR__/g, agentDir)
+    .replace(/__BEDROUTER_CLI__/g, brCli), 0o755);
+} else note("bedrouter shim skipped (nested CLI path unknown; re-run without skipping package install)");
+if (flag("skip-cli") || flag("skip-firstmate")) note(`hablo wrapper skipped (${flag("skip-cli") ? "--skip-cli" : "--skip-firstmate: the wrapper needs the firstmate checkout"})`);
 else {
-  // Copied, not symlinked: the wrapper must keep working if this installer checkout moves or goes away. The firstmate
-  // location is stamped in; FM_ROOT / FM_HOME in the environment still override it.
-  const installFile = (src, dst, transform, mode) => {
-    const next = transform(fs.readFileSync(src, "utf8"));
-    const cur = fs.existsSync(dst) ? fs.readFileSync(dst, "utf8") : null;
-    if (cur === next) { note(`${path.relative(home, dst)} up to date`); return; }
-    if (cur !== null && !/HABLO-installer/.test(cur)) { note(`${path.relative(home, dst)} exists and was not written by this installer; leaving it`); return; }
-    writeText(dst, next);
-    if (!DRY) fs.chmodSync(dst, mode);
-    did(`${cur === null ? "install" : "update"} ${path.relative(home, dst)}`);
-  };
+  // The firstmate location is stamped in; FM_ROOT / FM_HOME in the environment still override it.
   const cliModel = opt("cli-model", cli.model ?? "auto");
   const stampHablo = (t) => t.replace(/__FM_ROOT__/g, fmDir).replace(/__HABLO_INSTALLER__/g, here).replace(/__HABLO_HOME__/g, habloHome).replace(/__PROVIDER__/g, cli.provider).replace(/__MODEL__/g, cliModel);
   installFile(path.join(here, "bin", "hablo"), path.join(binDir, "hablo"), stampHablo, 0o755);
@@ -1016,6 +1028,8 @@ else {
   installFile(path.join(here, "pi", "extensions", "hablo-fleet-status.mjs"), path.join(habloHome, "hablo-fleet-status.mjs"), (t) => t, 0o644);
   // Global crewmate extension: crewmates launch as `pi -e <task.pi-ext.ts>` and skip the hablo wrapper, so this must live under ~/.pi/agent/extensions/.
   installFile(path.join(here, "pi", "extensions", "hablo-crewmate.ts"), path.join(agentDir, "extensions", "hablo-crewmate.ts"), (t) => t, 0o644);
+  // Global progress hooks: post-tool git commit / gh pr create → hablo-jira (captains with -e still auto-load this).
+  installFile(path.join(here, "pi", "extensions", "hablo-progress.ts"), path.join(agentDir, "extensions", "hablo-progress.ts"), (t) => t, 0o644);
   const tonePath = path.join(habloHome, "tone.md");
   if (toneEnabled) {
     const source = fs.readFileSync(path.join(here, fm.tonePolicy), "utf8");
@@ -1301,5 +1315,5 @@ if (!goBin || !versionGte((run("go", ["version"]).stdout ?? "").match(/go(\d+\.\
 
 // ---- done ---------------------------------------------------------------------------------------------------------------
 log(`\nDone${DRY ? " (dry run; nothing written)" : ""}${warnings.length ? ` with ${warnings.length} warning(s):\n  - ${warnings.join("\n  - ")}` : ""}.`);
-log(`Next:\n  pi --provider bedrouter --model auto\n  /bedrouter status      /bedrouter probe      /bedrouter report\n  in a repo with a wiki: /openwiki doctor${flag("skip-firstmate") ? "" : `\n  firstmate: cd <your project> && hablo       -  or cd ${fmDir} && pi`}\n  hablo config            - edit Jira / secrets / Dream / Agent (runtime files)`);
+log(`Next:\n  pi --provider bedrouter --model auto\n  bedrouter doctor --probe\n  /bedrouter status      /bedrouter probe      /bedrouter report\n  in a repo with a wiki: /openwiki doctor${flag("skip-firstmate") ? "" : `\n  firstmate: cd <your project> && hablo       -  or cd ${fmDir} && pi`}\n  hablo config            - edit Jira / secrets / Dream / Agent (runtime files)`);
 if (!profile) log(`  (set AWS_PROFILE in ${envPath}, then: aws sso login --profile <name>)`);

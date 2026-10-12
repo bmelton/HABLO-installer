@@ -21,6 +21,10 @@ Work Jira ticket {{.Key}}.
 
 Your standing branch, wiki, and ticket policies in `data/captain.md` apply. Continue an existing `{{.Key}}` branch when present.
 
+Keep `{{.Key}}` current as you work: HABLO posts a progress comment after each successful commit and comments + moves the ticket to In Review when a PR is opened. Prefer that automatic path; if it missed, run `hablo-jira progress` / `hablo-jira pr-opened` yourself. Stage comments remain for artifact handoffs. Never transition the ticket to Done.
+
+When the voyage ends (PR open or blocked), record the outcome for dispatch:
+
     hablo-jira-agent report --key {{.Key}} --outcome done --pr <pull-request-url> --summary "<one line>"
     hablo-jira-agent report --key {{.Key}} --outcome failed --summary "<what blocked you>"
 

@@ -130,8 +130,35 @@ test("brief-include carries crewmate Jira reporting without delivery-contract li
   const include = fs.readFileSync(path.join(root, "firstmate", "brief-include.md"), "utf8");
   assert.match(include, /HABLO:BRIEF-INCLUDE:START/);
   assert.match(include, /hablo-jira comment --key <JIRA-KEY> --stage implementation/);
+  assert.match(include, /hablo-jira progress --key <JIRA-KEY> --commit/);
+  assert.match(include, /hablo-jira pr-opened --key <JIRA-KEY> --pr/);
   assert.match(include, /Never transition a ticket to Done/);
   assert.doesNotMatch(include, /Delivery contract: mode=/);
   const ticket = fs.readFileSync(path.join(root, "firstmate", "captain-ticket-policy.md"), "utf8");
   assert.match(ticket, /config\/brief-include\.md/);
+  assert.match(ticket, /hablo-jira progress/);
+  assert.match(ticket, /hablo-jira pr-opened/);
+  const brief = fs.readFileSync(path.join(root, "jira", "brief.tmpl.md"), "utf8");
+  assert.match(brief, /hablo-jira progress/);
+  assert.match(brief, /Never transition the ticket to Done/);
+});
+
+test("bedrouter PATH shim pins ~/.bedrouter env and config", () => {
+  const src = fs.readFileSync(path.join(root, "bin", "bedrouter"), "utf8");
+  assert.match(src, /HABLO-installer/);
+  assert.match(src, /BEDROUTER_ENV/);
+  assert.match(src, /BEDROUTER_CONFIG/);
+  assert.match(src, /__BEDROUTER_HOME__/);
+  assert.match(src, /__BEDROUTER_CLI__/);
+  assert.match(src, /cd "\$BR_HOME"/);
+});
+
+test("hablo-progress extension hooks git commit and gh pr create", () => {
+  const src = fs.readFileSync(path.join(root, "pi", "extensions", "hablo-progress.ts"), "utf8");
+  assert.match(src, /tool_result/);
+  assert.match(src, /hablo-jira/);
+  assert.match(src, /progress/);
+  assert.match(src, /pr-opened/);
+  assert.match(src, /git\\b/);
+  assert.match(src, /pr\\s\+create/);
 });
