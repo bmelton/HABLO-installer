@@ -29,7 +29,18 @@ Idempotent: run it again any time; it only changes what differs and never overwr
 | 14 | Builds Dream, which distills recent corrections into reviewed rule proposals, renders its configuration, and installs a daily launchd or systemd timer | `~/.local/bin/hablo-dream`, `~/.hablo/dream/`, user service configuration |
 | 15 | Builds `hablo-config`, a Bubble Tea TUI for editing runtime files (Jira, secrets, Spy, Dream, firstmate, CLI stamps, Agent) | `~/.local/bin/hablo-config`; `hablo config` |
 
-Then: `pi --provider bedrouter --model auto`. For firstmate: `cd <your project> && hablo` (or `cd ~/firstmate && pi`) — firstmate's `AGENTS.md` takes over the session, and it spawns crewmates as `pi --model bedrouter/auto` processes in tmux, routed explicitly by the dispatch file the installer writes. pi-bedrouter starts the server on first use, shows what served each request in the footer, and `/bedrouter status|probe|report`, `/openwiki doctor` work from inside Pi. From any shell, `bedrouter doctor --probe` uses the same `~/.bedrouter` home.
+Then: `pi --provider bedrouter --model auto`. For firstmate: `cd <your project> && hablo` (or `cd ~/firstmate && pi`) — firstmate's `AGENTS.md` takes over the session, and it spawns crewmates as `pi --model bedrouter/auto` processes in tmux, routed explicitly by the dispatch file the installer writes. With `~/.hablo/agent` = `claude`, `hablo` launches Claude Code instead (bedrouter Messages `auto`). pi-bedrouter starts the server on first use, shows what served each request in the footer, and `/bedrouter status|probe|report`, `/openwiki doctor` work from inside Pi. From any shell, `bedrouter doctor --probe` uses the same `~/.bedrouter` home.
+
+### Tests and Claude E2E
+
+```sh
+npm test                 # all Node tests (incl. Phase 6 fixture E2E)
+npm run test:e2e         # Claude path only: test/e2e-claude.test.mjs
+npm run smoke:claude     # live bedrouter/SSO/Claude gates (bin/hablo-e2e-claude-smoke.sh)
+BEDROUTER_SMOKE_TOOLS=1 npm run smoke:claude   # also stream tool_use on /v1/messages
+```
+
+Fixture E2E covers `--agent both` / `claude`, settings symlink write-through, plugin + TDD skill, TUI `--set-agent` flip, `hablo` Claude launch + missing-binary refuse, interrogate-on prompt, and commit/PR → `hablo-jira` soft-fail. Live smoke needs bedrouter 0.10+, SSO, and Claude Code on PATH.
 
 ## Options
 

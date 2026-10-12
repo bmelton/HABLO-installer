@@ -1,1 +1,10 @@
-{}
+{
+  "name": "hablo-installer",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test test/*.test.mjs",
+    "test:e2e": "node --test test/e2e-claude.test.mjs",
+    "smoke:claude": "bash bin/hablo-e2e-claude-smoke.sh"
+  }
+}

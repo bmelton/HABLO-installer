@@ -1,10 +1,8 @@
 # Claude Code as a second coding agent
 
-> Status: plan. The decisions below are settled. Each feature has its own
-> document; this one holds the order of work and the boundaries between them.
-> Claude-specific install/plugin/`hablo` work is not implemented yet.
-> Executive summary: [`CLAUDE-PLAN.md`](../CLAUDE-PLAN.md) (supersedes effort/MVP
-> notes here when they disagree).
+> Status: MVP shipped through Phase 6 fixtures. Live Claude+SSO streaming smoke
+> remains an operator gate (`npm run smoke:claude`). Executive summary:
+> [`CLAUDE-PLAN.md`](../CLAUDE-PLAN.md).
 >
 > **Pi prerequisites already shipped:** Config TUI Agent page, Interrogate
 > (plan mode / TDD), Progress (commit + PR → Jira), bedrouter Messages `auto`
@@ -12,12 +10,12 @@
 
 - [x] [Agent selection](CLAUDE-CODE-AGENT-SELECTION.md): the install-time prompt, `--agent`, marker, receipt (manifest `agents.pi` move deferred)
 - [x] [Routing](CLAUDE-CODE-ROUTING.md): Claude Code reaches Bedrock through bedrouter (settings.env + SessionStart; live smoke still open)
-- [ ] [Plugin](CLAUDE-CODE-PLUGIN.md): agents, commands, skills and workflows as one installable unit (incl. TDD/interrogate skill when enabled)
-- [ ] [firstmate](CLAUDE-CODE-FIRSTMATE.md): the `claude` crew harness, the permission posture, and the `hablo` wrapper (captain prompt carries interrogate + progress duties)
-- [ ] Progress parity: Claude hooks calling shared `hablo-jira progress` / `pr-opened` after commit and PR open
+- [x] [Plugin](CLAUDE-CODE-PLUGIN.md): agents, commands, skills and workflows as one installable unit (incl. TDD/interrogate skill when enabled)
+- [x] [firstmate](CLAUDE-CODE-FIRSTMATE.md): the `claude` crew harness, the permission posture, and the `hablo` wrapper (captain prompt carries interrogate + progress duties)
+- [x] Progress parity: Claude hooks calling shared `hablo-jira progress` / `pr-opened` after commit and PR open
 - [ ] [Guard](CLAUDE-CODE-GUARD.md): the fail-closed tool-call guard on Claude Code hooks (**optional for first ship**; see CLAUDE-PLAN)
-- [ ] `README.md`: a section per agent, and an agent column on the step table
-- [ ] End-to-end: `--agent claude` and `--agent both`, including interrogate-when-on and commit/PR → Jira
+- [x] `README.md`: Claude routing/plugin/`hablo` sections
+- [x] End-to-end: fixture suite `test/e2e-claude.test.mjs`; live `bin/hablo-e2e-claude-smoke.sh`
 
 ## What this is
 

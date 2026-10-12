@@ -113,13 +113,13 @@ Interrogate and progress keep their existing `hablo.json` keys; Claude does not 
 - [x] Ship `CONFIG-TUI-PLAN.md` (workspace backlog) with Agent toggle (warn if Claude missing)
 - [x] Interrogate on Pi (`INTERROGATE-PLAN.md` (workspace backlog))
 - [x] Progress on Pi (`PROGRESS-UPDATE-PLAN.md` (workspace backlog))
-- [ ] Live Claude+SSO streaming `tool_use` smoke against bedrouter
+- [ ] Live Claude+SSO streaming `tool_use` smoke against bedrouter (`npm run smoke:claude` / `BEDROUTER_SMOKE_TOOLS=1`)
 - [x] Phase 1: install prompt + `--agent` + marker + receipt
 - [x] Phase 2: Claude + bedrouter settings + SessionStart
 - [x] Phase 3: HABLO Claude plugin (incl. TDD/interrogate skill surface)
 - [x] Phase 4: firstmate/`hablo` + missing-Claude install-or-exit prompt
 - [x] Phase 4b: Claude commit/PR → `hablo-jira` progress parity (plugin hooks in Phase 3)
-- [ ] Phase 6: E2E (voyage, TUI flip, missing binary, interrogate when on, commit/PR → Jira)
+- [x] Phase 6: E2E fixtures (`test/e2e-claude.test.mjs`); live SSO smoke script (`bin/hablo-e2e-claude-smoke.sh`)
 - [ ] Phase 5 (optional later): guard with Pi
 
 ## Non-goals
