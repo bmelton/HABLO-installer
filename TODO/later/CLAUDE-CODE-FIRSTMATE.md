@@ -4,20 +4,20 @@
 > smallest of the five documents, because firstmate already speaks `claude`
 > natively and speaks it in more detail than it speaks Pi.
 
-- [ ] `install.mjs` step 9: write `config/crew-harness` = `claude` for the Claude Code side
-- [ ] Add `firstmate/crew-dispatch-claude.json` and point `hablo.json` at it
-- [ ] Verify Claude Code accepts `--model auto` against a custom base URL; fall back to omitting the key
-- [ ] `install.mjs` step 9: write `config/claude-permission-mode` = `auto`
-- [ ] Preflight `bin/fm-claude-trust.sh` presence and report it, because it can refuse a spawn
-- [ ] `bin/hablo`: add the Claude Code launch branch
-- [ ] Write `~/.hablo/hablo-captain-prompt.sh`, the shell equivalent of `hablo-captain.ts`
-- [ ] Captain prompt: when `interrogate.enabled`, include the same senior-lead / TDD nudge Pi gets from `captain-interrogate-policy.md` (point at installed TDD skill)
-- [ ] Captain + brief path: Progress duty text already in ticket policy / `brief-include.md`; confirm Claude crews receive it unchanged
-- [ ] Progress automation: Claude hooks (plugin or per-worktree settings) call `hablo-jira progress` after commit and `hablo-jira pr-opened` after PR create — same CLI as Pi; soft-fail
-- [ ] `install.mjs` step 11: run `*-axi setup hooks` when Claude Code is selected
-- [ ] Add `.hablo/hablo-captain-prompt.sh` to `backup.config` in `hablo.json`
+- [x] `install.mjs` step 9: write `config/crew-harness` = `claude` for the Claude Code side
+- [x] Add `firstmate/crew-dispatch-claude.json` and point `hablo.json` at it
+- [ ] Verify Claude Code accepts `--model auto` against a custom base URL; fall back to omitting the key (dispatch keeps `model: auto`; live smoke in Phase 6)
+- [x] `install.mjs` step 9: write `config/claude-permission-mode` = `auto`
+- [x] Preflight `bin/fm-claude-trust.sh` presence and report it, because it can refuse a spawn
+- [x] `bin/hablo`: add the Claude Code launch branch
+- [x] Write `~/.hablo/hablo-captain-prompt.sh`, the shell equivalent of `hablo-captain.ts`
+- [x] Captain prompt: when `interrogate.enabled`, include the same senior-lead / TDD nudge Pi gets from `captain-interrogate-policy.md` (point at installed TDD skill)
+- [x] Captain + brief path: Progress duty text already in ticket policy / `brief-include.md`; confirm Claude crews receive it unchanged
+- [x] Progress automation: Claude hooks (plugin) call `hablo-jira progress` after commit and `hablo-jira pr-opened` after PR create — same CLI as Pi; soft-fail
+- [x] `install.mjs` step 11: run `*-axi setup hooks` when Claude Code is selected
+- [x] Add `.hablo/hablo-captain-prompt.sh` to `backup.config` in `hablo.json`
 - [ ] Run a real voyage: captain, one crewmate, one scout; turn-end signal; interrogate-when-on; commit/PR → Jira
-- [ ] `README.md`: the firstmate section gains a harness column
+- [x] `README.md`: the firstmate section gains a harness column
 
 ## What firstmate already does
 

@@ -1175,15 +1175,26 @@ else {
       const curPerm = fs.existsSync(permPath) ? fs.readFileSync(permPath, "utf8").trim() : "";
       if (curPerm !== wantPerm) { writeText(permPath, wantPerm + "\n"); did(`write ${path.relative(home, permPath)} = ${wantPerm}`); }
       else note(`claude-permission-mode already ${curPerm}`);
+      const trust = path.join(fmDir, "bin", "fm-claude-trust.sh");
+      if (fs.existsSync(trust)) note(`claude trust helper present: ${path.relative(home, trust)}`);
+      else warn(`claude trust helper missing at ${homePath(trust)}; crewmates may block on workspace trust dialogs`);
     }
+    // Twin dispatch sources under ~/.hablo so hablo-config can flip harness without this checkout.
+    const dispatchPi = fs.readFileSync(path.join(here, fm.crewDispatch), "utf8");
+    const dispatchClaudePath = path.join(here, fm.crewDispatchClaude ?? "firstmate/crew-dispatch-claude.json");
+    if (!fs.existsSync(dispatchClaudePath)) fail(`missing ${dispatchClaudePath}`);
+    const dispatchClaude = fs.readFileSync(dispatchClaudePath, "utf8");
+    writeText(path.join(habloHome, "crew-dispatch-pi.json"), dispatchPi);
+    writeText(path.join(habloHome, "crew-dispatch-claude.json"), dispatchClaude);
+    did(`install ${homePath(path.join(habloHome, "crew-dispatch-pi.json"))} + crew-dispatch-claude.json`);
     // When this file exists fm-spawn refuses any spawn without a resolved harness, by design.
-    const dispatch = fs.readFileSync(path.join(here, fm.crewDispatch), "utf8");
+    const dispatch = crewHarness === "claude" ? dispatchClaude : dispatchPi;
     const dispatchPath = path.join(fmDir, "config", "crew-dispatch.json");
     const curDispatch = fs.existsSync(dispatchPath) ? fs.readFileSync(dispatchPath, "utf8") : "";
     if (curDispatch !== dispatch) {
       if (curDispatch && !/HABLO-installer/.test(curDispatch)) note(`${path.relative(home, dispatchPath)} exists and was not written by this installer; leaving it (delete it to adopt the HABLO one)`);
-      else { writeText(dispatchPath, dispatch); did(`write ${path.relative(home, dispatchPath)}: every crewmate inherits the captain's provider/model through its brief`); }
-    } else note("crew dispatch already inherits the captain's provider/model");
+      else { writeText(dispatchPath, dispatch); did(`write ${path.relative(home, dispatchPath)}: harness=${crewHarness}; voyage model via captain brief / --model`); }
+    } else note(`crew dispatch already set for harness=${crewHarness}`);
     // Backend
     const backend = opt("backend", fm.backend);
     if (backend) {
@@ -1307,12 +1318,14 @@ else {
   const cliModel = opt("cli-model", cli.model ?? "auto");
   const stampHablo = (t) => t.replace(/__FM_ROOT__/g, fmDir).replace(/__HABLO_INSTALLER__/g, here).replace(/__HABLO_HOME__/g, habloHome).replace(/__PROVIDER__/g, cli.provider).replace(/__MODEL__/g, cliModel);
   installFile(path.join(here, "bin", "hablo"), path.join(binDir, "hablo"), stampHablo, 0o755);
-  note(`hablo defaults to --provider ${cli.provider} --model ${cliModel} (HABLO_PROVIDER / HABLO_MODEL or your own flags override)`);
+  note(`hablo defaults to --provider ${cli.provider} --model ${cliModel} (HABLO_PROVIDER / HABLO_MODEL or your own flags override); agent from ~/.hablo/agent`);
   // Preflight + fleet reset: stamped copies under ~/.hablo and ~/.local/bin (hablo looks in HABLO_HOME first).
   installFile(path.join(here, "bin", "hablo-preflight"), path.join(habloHome, "hablo-preflight"), (t) => t, 0o755);
   installFile(path.join(here, "bin", "hablo-preflight"), path.join(binDir, "hablo-preflight"), (t) => t, 0o755);
   installFile(path.join(here, "bin", "hablo-fleet-reset"), path.join(binDir, "hablo-fleet-reset"), (t) => t, 0o755);
   installFile(path.join(here, "pi", "extensions", "hablo-captain.ts"), path.join(habloHome, "hablo-captain.ts"), (t) => t, 0o644);
+  // Claude Code captain prompt (append-system-prompt). Installed whenever hablo is; used when agent=claude.
+  installFile(path.join(here, "bin", "hablo-captain-prompt.sh"), path.join(habloHome, "hablo-captain-prompt.sh"), (t) => t, 0o755);
   // Imported by hablo-captain for the fleet footer; must sit next to it under ~/.hablo/.
   installFile(path.join(here, "pi", "extensions", "hablo-fleet-status.mjs"), path.join(habloHome, "hablo-fleet-status.mjs"), (t) => t, 0o644);
   // Global crewmate extension: crewmates launch as `pi -e <task.pi-ext.ts>` and skip the hablo wrapper, so this must live under ~/.pi/agent/extensions/.
@@ -1479,8 +1492,18 @@ else {
       else record({ kind: "script.install", name: t, source: url, wasPresent });
     }
   }
-  if (wantsClaude) note("(Claude Code selected: *-axi `setup hooks` still deferred — those hooks write Claude/Codex/OpenCode session config; enable when Phase 2+ lands)");
-  else note("(the *-axi `setup hooks` step is not run: it installs Claude Code/Codex/OpenCode session hooks, which Pi does not use)");
+  if (wantsClaude) {
+    // Ambient SessionStart hooks for Claude Code (and siblings those packages also target).
+    for (const t of tools.npm) {
+      if (!present(t)) { note(`skip ${t} setup hooks (${t} not on PATH)`); continue; }
+      did(`${t} setup hooks`);
+      if (!DRY) {
+        const r = run(t, ["setup", "hooks"], { env: { PATH: childPath }, timeout: 120_000 });
+        if (r.status !== 0) warn(`${t} setup hooks failed (exit ${r.status}); run by hand: ${t} setup hooks`);
+        else record({ kind: "axi.setup-hooks", name: t });
+      }
+    }
+  } else note("(the *-axi `setup hooks` step is not run: it installs Claude Code/Codex/OpenCode session hooks, which Pi does not use)");
 }
 
 // ---- 13 Jira reporting and dispatch -------------------------------------------------------------------------------------
@@ -1645,12 +1668,11 @@ log(`\nDone${DRY ? " (dry run; nothing written)" : ""}${warnings.length ? ` with
   }
   if (wantsClaude) {
     next.push("  Claude Code: settings.env → bedrouter; HABLO plugin (~/.hablo/claude) owns SessionStart + progress");
-    next.push("  claude   (or firstmate with crew-harness=claude once Phase 4 lands)");
     if (!which("claude")) next.push("  install Claude Code, then: hablo config  (Agent page) or re-run with --agent claude");
   }
   if (!flag("skip-firstmate")) {
     if (activeAgent === "pi") next.push(`  firstmate: cd <your project> && hablo       -  or cd ${fmDir} && pi`);
-    else next.push(`  firstmate crew-harness=claude (captain launch via hablo Claude branch lands in Phase 4); checkout: ${fmDir}`);
+    else next.push(`  firstmate: cd <your project> && hablo   (Claude Code captain; crew-harness=claude); checkout: ${fmDir}`);
   }
   next.push("  hablo config            - edit Jira / secrets / Dream / Agent (runtime files)");
   next.push(`  agent preference: ${agentMarkerPath} = ${activeAgent} (installAgent=${installAgent})`);

@@ -52,7 +52,7 @@ func (a *agentPage) save() {
 		a.form.status = ""
 		return
 	}
-	a.form.status = "saved agent=" + name + " (marker + crew-harness)"
+	a.form.status = "saved agent=" + name + " (marker + crew-harness + dispatch)"
 	if w := agent.WarnClaudeMissing(name); w != "" {
 		a.form.err = w
 	} else {

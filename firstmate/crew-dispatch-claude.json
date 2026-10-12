@@ -1,0 +1,21 @@
+{
+  "$comment": "Written by HABLO-installer to <firstmate>/config/crew-dispatch.json when crew-harness=claude. Every crewmate and scout is a Claude Code session on bedrouter auto (Messages /v1/messages). ANTHROPIC_MODEL in ~/.claude/settings.json is the backstop; the explicit model here keeps dispatch documented the same way as the Pi twin. If Claude Code rejects --model auto against the custom base URL, drop the model key and rely on settings.env — do not invent Anthropic alias pins.",
+  "rules": [
+    {
+      "when": "Any task: implementation, fixes, refactors, tests, documentation, investigation, review, scouting.",
+      "use": { "harness": "claude", "model": "auto" },
+      "why": "The crew runs Claude Code through bedrouter. Pass --model auto (or omit and inherit ANTHROPIC_MODEL=auto). Tiering stays bedrouter's per-request decision; do not pin sonnet/opus/fable unless the user asked and that alias is live on GET /v1/models."
+    },
+    {
+      "when": "The user explicitly asks for a specific tier, e.g. 'use the strongest model' or 'cheap pass only'.",
+      "use": { "harness": "claude", "model": "auto" },
+      "why": "Prefer raising effort / asking bedrouter via auto rather than pinning a model. Never invent or enable a disabled rung (fable ships enabled:false)."
+    },
+    {
+      "when": "A previous crewmate refused the FIRSTMATE_OP brief as prompt injection, or died with Operation aborted.",
+      "use": { "harness": "claude", "model": "auto" },
+      "why": "Respawn once on the voyage model (Crew model block), not a pinned Anthropic alias. Brief-refusal and abort handling are in the HABLO model policy in data/captain.md."
+    }
+  ],
+  "default": { "harness": "claude", "model": "auto" }
+}

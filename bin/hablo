@@ -20,8 +20,9 @@
 #   PATH                        -> +$FM_ROOT/bin, so the relative `bin/fm-*.sh` calls in AGENTS.md resolve
 #   data/projects.md            -> gets a registry line for this project (once)
 #   projects/<name>             -> a symlink to this directory, so scripts that expect projects/<name> keep working
-#   pi -e ...                   -> firstmate's tracked Pi extensions plus hablo-captain.ts, which injects AGENTS.md
-#                                  (with absolute bin/ paths) into the system prompt
+#   agent                       -> ~/.hablo/agent (pi|claude); HABLO_AGENT overrides. Claude never falls back to Pi.
+#   pi -e ...                   -> (pi) firstmate Pi extensions + hablo-captain.ts
+#   claude --append-system-prompt -> (claude) ~/.hablo/hablo-captain-prompt.sh
 #   --provider/--model          -> the provider and model chosen for this voyage; command-line flags win over
 #                                  HABLO_PROVIDER / HABLO_MODEL, which win over the installer defaults
 # Bash 3.2 compatible (macOS); works on Linux and WSL. Nothing here needs root.
@@ -36,10 +37,29 @@ DEFAULT_MODEL="__MODEL__"
 PROVIDER="${HABLO_PROVIDER:-$DEFAULT_PROVIDER}"
 MODEL="${HABLO_MODEL:-$DEFAULT_MODEL}"
 
+resolve_agent() {
+  if [ -n "${HABLO_AGENT:-}" ]; then
+    printf '%s' "$HABLO_AGENT"
+    return
+  fi
+  if [ -f "$HABLO_HOME/agent" ]; then
+    tr -d '\n' < "$HABLO_HOME/agent"
+    return
+  fi
+  printf 'pi'
+}
+
+AGENT="$(resolve_agent)"
+case "$AGENT" in
+  pi|claude) ;;
+  *) AGENT=pi ;;
+esac
+
 usage() {
-  sed -n '2,20p' "$0" | sed 's/^# \{0,1\}//'
+  sed -n '2,22p' "$0" | sed 's/^# \{0,1\}//'
   echo
   echo "env: FM_ROOT (firstmate checkout), FM_HOME (firstmate home, default FM_ROOT), HABLO_PROJECT_MODE (default direct-PR),"
+  echo "     HABLO_AGENT (pi|claude; default from ~/.hablo/agent),"
   echo "     HABLO_PROVIDER / HABLO_MODEL (default $PROVIDER / $MODEL),"
   echo "     HABLO_PI (absolute pi binary), HABLO_MIN_PI_VERSION / HABLO_MIN_NODE_VERSION (runtime floor),"
   echo "     HABLO_PREFLIGHT=skip|soft (SSO/model gate),"
@@ -65,7 +85,20 @@ case "${1:-}" in
 esac
 
 [ -d "$FM_ROOT/bin" ] || { echo "hablo: firstmate checkout not found at $FM_ROOT (run the HABLO installer, or set FM_ROOT)" >&2; exit 1; }
-[ -f "$HABLO_HOME/hablo-captain.ts" ] || { echo "hablo: $HABLO_HOME/hablo-captain.ts missing (re-run the HABLO installer)" >&2; exit 1; }
+
+if [ "$AGENT" = claude ]; then
+  [ -f "$HABLO_HOME/hablo-captain-prompt.sh" ] || { echo "hablo: $HABLO_HOME/hablo-captain-prompt.sh missing (re-run the HABLO installer)" >&2; exit 1; }
+  if ! command -v claude >/dev/null 2>&1; then
+    echo "hablo: Claude Code is not on PATH (agent=$AGENT)." >&2
+    echo "       Install: https://docs.anthropic.com/en/docs/claude-code" >&2
+    echo "       Or switch agent: hablo config   (Agent page) / hablo-config --set-agent pi" >&2
+    echo "       Refusing to fall back to Pi." >&2
+    exit 1
+  fi
+  echo "hablo: runtime  claude ($(command -v claude))" >&2
+else
+  [ -f "$HABLO_HOME/hablo-captain.ts" ] || { echo "hablo: $HABLO_HOME/hablo-captain.ts missing (re-run the HABLO installer)" >&2; exit 1; }
+fi
 
 # firstmate's Pi extensions (fm-calm, etc.) need Pi >= 0.85 (`registerEntryRenderer`). A shell whose PATH
 # still has an older Node's global `pi` (e.g. nvm v22.14 → pi 0.74) makes `hablo` fail at extension load.
@@ -144,28 +177,31 @@ pick_runtime() {
   return 1
 }
 
-RUNTIME="$(pick_runtime || true)"
-if [ -z "$RUNTIME" ]; then
-  echo "hablo: need Pi >= $MIN_PI_VERSION on Node >= $MIN_NODE_VERSION (firstmate extensions use registerEntryRenderer)." >&2
-  echo "       Your PATH's pi is too old or missing. Fix with:" >&2
-  echo "         curl -fsSL https://pi.dev/install.sh | sh" >&2
-  echo "       (needs Node >= $MIN_NODE_VERSION and npm on PATH for the installer)" >&2
-  echo "       Or: export HABLO_PI=/path/to/pi  (and put matching node first on PATH)" >&2
-  if command -v pi >/dev/null 2>&1; then
-    echo "       Currently: $(command -v pi) -> $(pi_version_of "$(command -v pi)" || echo unknown) ; node $(node -v 2>/dev/null || echo missing)" >&2
+PI_BIN=""
+if [ "$AGENT" = pi ]; then
+  RUNTIME="$(pick_runtime || true)"
+  if [ -z "$RUNTIME" ]; then
+    echo "hablo: need Pi >= $MIN_PI_VERSION on Node >= $MIN_NODE_VERSION (firstmate extensions use registerEntryRenderer)." >&2
+    echo "       Your PATH's pi is too old or missing. Fix with:" >&2
+    echo "         curl -fsSL https://pi.dev/install.sh | sh" >&2
+    echo "       (needs Node >= $MIN_NODE_VERSION and npm on PATH for the installer)" >&2
+    echo "       Or: export HABLO_PI=/path/to/pi  (and put matching node first on PATH)" >&2
+    if command -v pi >/dev/null 2>&1; then
+      echo "       Currently: $(command -v pi) -> $(pi_version_of "$(command -v pi)" || echo unknown) ; node $(node -v 2>/dev/null || echo missing)" >&2
+    fi
+    exit 1
   fi
-  exit 1
+  PI_BIN="${RUNTIME%%|*}"
+  PI_NODE_DIR="${RUNTIME#*|}"
+  if [ -n "$PI_NODE_DIR" ]; then
+    export PATH="$PI_NODE_DIR:$PATH"
+  fi
+  # Re-hash so subsequent `pi` / `node` match the chosen runtime (bash).
+  hash -r 2>/dev/null || true
+  PI_VER="$(pi_version_of "$PI_BIN" || echo unknown)"
+  NODE_VER="$(node -v 2>/dev/null || echo unknown)"
+  echo "hablo: runtime  pi $PI_VER ($PI_BIN) on node $NODE_VER" >&2
 fi
-PI_BIN="${RUNTIME%%|*}"
-PI_NODE_DIR="${RUNTIME#*|}"
-if [ -n "$PI_NODE_DIR" ]; then
-  export PATH="$PI_NODE_DIR:$PATH"
-fi
-# Re-hash so subsequent `pi` / `node` match the chosen runtime (bash).
-hash -r 2>/dev/null || true
-PI_VER="$(pi_version_of "$PI_BIN" || echo unknown)"
-NODE_VER="$(node -v 2>/dev/null || echo unknown)"
-echo "hablo: runtime  pi $PI_VER ($PI_BIN) on node $NODE_VER" >&2
 
 is_git_root() {
   [ -n "${1:-}" ] && git -C "$1" rev-parse --show-toplevel >/dev/null 2>&1
@@ -270,8 +306,8 @@ export FM_ROOT_OVERRIDE="$root_real"
 export FM_HOME="${FM_HOME:-$root_real}"
 export PATH="$root_real/bin:$PATH"
 
-# Resolve the voyage before launching. Pi accepts provider/id in --model; firstmate's Pi harness has no separate
-# provider slot, so HABLO_CREW_MODEL always carries that complete form.
+# Resolve the voyage before launching. Pi accepts provider/id in --model; Claude Code uses a bare model
+# (usually auto) against ANTHROPIC_BASE_URL. HABLO_CREW_MODEL is what the captain prompt tells spawn to use.
 has_provider=0; has_model=0; cli_provider=""; cli_model=""; expect=""
 for a in "$@"; do
   if [ -n "$expect" ]; then
@@ -293,28 +329,52 @@ done
 [ "$has_provider" = 0 ] || PROVIDER="$cli_provider"
 [ "$has_model" = 0 ] || MODEL="$cli_model"
 
-case "$MODEL" in
-  */*)
-    CREW_MODEL="$MODEL"; VOYAGE_PROVIDER="${MODEL%%/*}"
-    if [ "$has_provider" = 1 ] && [ "$PROVIDER" != "$VOYAGE_PROVIDER" ]; then
-      echo "hablo: --provider '$PROVIDER' conflicts with --model '$MODEL'" >&2; exit 2
-    fi
-    PROVIDER="$VOYAGE_PROVIDER"
-    ;;
-  *)
-    if [ "$has_model" = 1 ] && [ "$has_provider" = 0 ] && [ -z "${HABLO_PROVIDER:-}" ]; then
-      settings_provider="$(node -e 'try { const j=require(process.argv[1]); process.stdout.write(j.defaultProvider || "") } catch {}' "${PI_CODING_AGENT_DIR:-$HOME/.pi/agent}/settings.json")"
-      [ -n "$settings_provider" ] || { echo "hablo: --model '$MODEL' has no provider; use --model provider/id or add --provider" >&2; exit 2; }
-      PROVIDER="$settings_provider"
-    fi
-    CREW_MODEL="$PROVIDER/$MODEL"; VOYAGE_PROVIDER="$PROVIDER"
-    ;;
-esac
+if [ "$AGENT" = claude ]; then
+  # Strip --provider* from argv: Claude Code has no provider flag.
+  if [ "$has_provider" = 1 ]; then
+    _hablo_json="$(node -e '
+      const a = process.argv.slice(1);
+      const o = [];
+      for (let i = 0; i < a.length; i++) {
+        if (a[i] === "--provider") { i++; continue; }
+        if (String(a[i]).startsWith("--provider=")) continue;
+        o.push(a[i]);
+      }
+      process.stdout.write(JSON.stringify(o));
+    ' "$@")"
+    eval "set -- $(node -e 'for (const a of JSON.parse(process.argv[1])) process.stdout.write(" " + JSON.stringify(a));' "$_hablo_json")"
+    unset _hablo_json
+  fi
+  case "$MODEL" in
+    */*) MODEL="${MODEL#*/}" ;;
+  esac
+  CREW_MODEL="$MODEL"
+  VOYAGE_PROVIDER="bedrouter"
+  [ "$has_model" = 1 ] || set -- --model "$MODEL" "$@"
+else
+  case "$MODEL" in
+    */*)
+      CREW_MODEL="$MODEL"; VOYAGE_PROVIDER="${MODEL%%/*}"
+      if [ "$has_provider" = 1 ] && [ "$PROVIDER" != "$VOYAGE_PROVIDER" ]; then
+        echo "hablo: --provider '$PROVIDER' conflicts with --model '$MODEL'" >&2; exit 2
+      fi
+      PROVIDER="$VOYAGE_PROVIDER"
+      ;;
+    *)
+      if [ "$has_model" = 1 ] && [ "$has_provider" = 0 ] && [ -z "${HABLO_PROVIDER:-}" ]; then
+        settings_provider="$(node -e 'try { const j=require(process.argv[1]); process.stdout.write(j.defaultProvider || "") } catch {}' "${PI_CODING_AGENT_DIR:-$HOME/.pi/agent}/settings.json")"
+        [ -n "$settings_provider" ] || { echo "hablo: --model '$MODEL' has no provider; use --model provider/id or add --provider" >&2; exit 2; }
+        PROVIDER="$settings_provider"
+      fi
+      CREW_MODEL="$PROVIDER/$MODEL"; VOYAGE_PROVIDER="$PROVIDER"
+      ;;
+  esac
+  [ "$has_model" = 1 ] || set -- --model "$MODEL" "$@"
+  [ "$has_provider" = 1 ] || set -- --provider "$PROVIDER" "$@"
+fi
 export HABLO_CREW_MODEL="$CREW_MODEL"
 
-[ "$has_model" = 1 ] || set -- --model "$MODEL" "$@"
-[ "$has_provider" = 1 ] || set -- --provider "$PROVIDER" "$@"
-
+echo "hablo: agent    $AGENT" >&2
 echo "hablo: captain  $CREW_MODEL" >&2
 echo "hablo: crew     $CREW_MODEL (inherited)" >&2
 if [ "$VOYAGE_PROVIDER" != bedrouter ]; then
@@ -330,7 +390,11 @@ for c in "$HABLO_HOME/hablo-preflight" "$(dirname "$0")/hablo-preflight" "$HABLO
 done
 if [ -n "$preflight" ]; then
   set +e
-  "$preflight" --provider "$PROVIDER" --model "$CREW_MODEL"
+  if [ "$AGENT" = claude ]; then
+    "$preflight" --provider bedrouter --model "$CREW_MODEL"
+  else
+    "$preflight" --provider "$PROVIDER" --model "$CREW_MODEL"
+  fi
   ec=$?
   set -e
   if [ "$ec" = 2 ]; then
@@ -343,8 +407,11 @@ else
   echo "hablo: WARNING  hablo-preflight not found; skipping SSO/model gate" >&2
 fi
 
-# Standing in the firstmate checkout itself: plain firstmate, its own discovery does the rest.
-if [ "$proj" = "$root_real" ]; then exec "$PI_BIN" "$@"; fi
+# Standing in the firstmate checkout itself: plain harness, its own discovery does the rest.
+if [ "$proj" = "$root_real" ]; then
+  if [ "$AGENT" = claude ]; then exec claude "$@"; fi
+  exec "$PI_BIN" "$@"
+fi
 
 if ! is_git_root "$proj"; then
   echo "hablo: $(pwd -P) is not a git repository; firstmate works on git projects (worktrees, branches, PRs)." >&2
@@ -382,6 +449,15 @@ else
 fi
 
 export HABLO_PROJECT="$proj" HABLO_PROJECT_NAME="$name"
+
+if [ "$AGENT" = claude ]; then
+  if [ ! -x "$root_real/bin/fm-claude-trust.sh" ]; then
+    echo "hablo: WARNING  $root_real/bin/fm-claude-trust.sh missing; crewmates may block on workspace trust" >&2
+  fi
+  prompt="$("$HABLO_HOME/hablo-captain-prompt.sh")"
+  exec claude --append-system-prompt "$prompt" "$@"
+fi
+
 ext="$root_real/.pi/extensions"
 set -- -e "$HABLO_HOME/hablo-captain.ts" "$@"
 loaded=

@@ -70,13 +70,49 @@ func ReadCrewHarness(firstmateDir string) string {
 	return Pi
 }
 
+// WriteClaudePermissionMode writes firstmate config/claude-permission-mode (auto for HABLO).
+func WriteClaudePermissionMode(firstmateDir, mode string) error {
+	path := filepath.Join(firstmateDir, "config", "claude-permission-mode")
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return err
+	}
+	return os.WriteFile(path, []byte(mode+"\n"), 0o644)
+}
+
+// ApplyCrewDispatch copies ~/.hablo/crew-dispatch-<name>.json over firstmate config/crew-dispatch.json
+// when the destination is missing or HABLO-managed. Returns nil if the template is absent (older install).
+func ApplyCrewDispatch(habloHome, firstmateDir, name string) error {
+	name = strings.TrimSpace(name)
+	if name != Pi && name != Claude {
+		return fmt.Errorf("dispatch agent must be %q or %q", Pi, Claude)
+	}
+	src := filepath.Join(habloHome, "crew-dispatch-"+name+".json")
+	body, err := os.ReadFile(src)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
+	}
+	dst := filepath.Join(firstmateDir, "config", "crew-dispatch.json")
+	if cur, err := os.ReadFile(dst); err == nil {
+		if len(cur) > 0 && !strings.Contains(string(cur), "HABLO-installer") {
+			return nil // operator-owned
+		}
+	}
+	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+		return err
+	}
+	return os.WriteFile(dst, body, 0o644)
+}
+
 // ClaudeOnPATH reports whether a `claude` binary is findable.
 func ClaudeOnPATH() bool {
 	_, err := exec.LookPath("claude")
 	return err == nil
 }
 
-// SetPreference writes marker + crew-harness together.
+// SetPreference writes marker + crew-harness + matching crew-dispatch (+ claude permission mode).
 func SetPreference(markerPath, firstmateDir, name string) error {
 	if err := Write(markerPath, name); err != nil {
 		return err
@@ -88,7 +124,19 @@ func SetPreference(markerPath, firstmateDir, name string) error {
 		// firstmate not installed yet; marker alone is enough
 		return nil
 	}
-	return WriteCrewHarness(firstmateDir, name)
+	if err := WriteCrewHarness(firstmateDir, name); err != nil {
+		return err
+	}
+	habloHome := filepath.Dir(markerPath)
+	if err := ApplyCrewDispatch(habloHome, firstmateDir, name); err != nil {
+		return err
+	}
+	if name == Claude {
+		if err := WriteClaudePermissionMode(firstmateDir, "auto"); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // WarnClaudeMissing returns a user-facing warning when Claude is selected but missing.

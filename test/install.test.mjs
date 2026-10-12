@@ -461,6 +461,99 @@ test("migrates ladder config and stale auto-oss settings to the stack", () => {
   }
 });
 
+test("Claude firstmate install writes harness, Claude dispatch, permission mode, and captain prompt", () => {
+  const f = fixture();
+  try {
+    const brPkg = path.join(f.npmModules, "bedrouter", "dist");
+    fs.mkdirSync(brPkg, { recursive: true });
+    fs.writeFileSync(path.join(brPkg, "cli.js"), "#!/usr/bin/env node\n");
+    fs.writeFileSync(path.join(f.npmModules, "bedrouter", "package.json"), JSON.stringify({ name: "bedrouter", version: "0.10.0" }));
+    writeExecutable(path.join(f.fakeBin, "npm"), `#!/bin/sh
+if [ "$1" = root ] && [ "$2" = -g ]; then echo ${JSON.stringify(f.npmModules)}; exit 0; fi
+exit 0
+`);
+
+    const out = install(f, ["--agent", "claude", "--skip-jira", "--skip-dream", "--skip-tools"]);
+    assert.match(out, /crew harness already claude|write .*crew-harness.*= claude/);
+    assert.equal(fs.readFileSync(path.join(f.firstmate, "config", "crew-harness"), "utf8").trim(), "claude");
+    assert.equal(fs.readFileSync(path.join(f.firstmate, "config", "claude-permission-mode"), "utf8").trim(), "auto");
+    const dispatch = fs.readFileSync(path.join(f.firstmate, "config", "crew-dispatch.json"), "utf8");
+    assert.match(dispatch, /"harness": "claude"/);
+    assert.match(dispatch, /HABLO-installer/);
+    assert.ok(fs.existsSync(path.join(f.home, ".hablo", "crew-dispatch-claude.json")));
+    assert.ok(fs.existsSync(path.join(f.home, ".hablo", "crew-dispatch-pi.json")));
+    assert.ok(fs.existsSync(path.join(f.home, ".hablo", "hablo-captain-prompt.sh")));
+    assert.equal(fs.statSync(path.join(f.home, ".hablo", "hablo-captain-prompt.sh")).mode & 0o111, 0o111);
+  } finally {
+    fs.rmSync(f.dir, { recursive: true, force: true });
+  }
+});
+
+test("hablo Claude branch launches claude with append-system-prompt; missing claude refuses Pi", () => {
+  const f = fixture();
+  try {
+    install(f);
+    fs.writeFileSync(path.join(f.home, ".hablo", "agent"), "claude\n");
+    fs.writeFileSync(path.join(f.firstmate, "config", "crew-harness"), "claude\n");
+    // Ensure prompt script is present (install with default agent=pi still installs it).
+    assert.ok(fs.existsSync(path.join(f.home, ".hablo", "hablo-captain-prompt.sh")));
+
+    const calls = path.join(f.dir, "claude-call.txt");
+    writeExecutable(path.join(f.fakeBin, "claude"), `#!/bin/sh
+printf '%s\\n' "$@" > ${JSON.stringify(calls)}
+printf 'PWD=%s\\n' "$(pwd -P)" >> ${JSON.stringify(calls)}
+`);
+    // Poison pi so a silent fallback would be visible.
+    writeExecutable(path.join(f.fakeBin, "pi"), `#!/bin/sh
+echo "pi should not run" >&2
+exit 99
+`);
+
+    const project = path.join(f.dir, "project");
+    fs.mkdirSync(project, { recursive: true });
+    execFileSync("git", ["init", "--quiet", project]);
+    fs.writeFileSync(path.join(f.firstmate, "AGENTS.md"), "# firstmate\n\nRun bin/fm-brief.sh.\n");
+
+    const ok = spawnSync(path.join(f.home, ".local", "bin", "hablo"), [], {
+      cwd: project,
+      encoding: "utf8",
+      env: {
+        ...process.env,
+        HOME: f.home,
+        PATH: `${f.fakeBin}:${process.env.PATH}`,
+        HABLO_PREFLIGHT: "skip",
+        HABLO_HERDR_STAMP: "0",
+      },
+    });
+    assert.equal(ok.status, 0, ok.stderr);
+    assert.match(ok.stderr, /agent\s+claude/);
+    const call = fs.readFileSync(calls, "utf8");
+    assert.match(call, /--append-system-prompt/);
+    assert.match(call, /--model/);
+    assert.doesNotMatch(call, /--provider/);
+    assert.match(call, /firstmate captain/);
+    assert.match(call, /fm-brief\.sh/);
+
+    fs.unlinkSync(path.join(f.fakeBin, "claude"));
+    const missing = spawnSync(path.join(f.home, ".local", "bin", "hablo"), [], {
+      cwd: project,
+      encoding: "utf8",
+      env: {
+        ...process.env,
+        HOME: f.home,
+        PATH: `${f.fakeBin}:${process.env.PATH}`,
+        HABLO_PREFLIGHT: "skip",
+        HABLO_HERDR_STAMP: "0",
+      },
+    });
+    assert.notEqual(missing.status, 0);
+    assert.match(missing.stderr, /Claude Code is not on PATH/);
+    assert.match(missing.stderr, /Refusing to fall back to Pi/);
+  } finally {
+    fs.rmSync(f.dir, { recursive: true, force: true });
+  }
+});
+
 test("hablo resolves one captain/crew model and refuses an ambiguous bare model", () => {
   const f = fixture();
   try {

@@ -157,6 +157,7 @@
       "tmux"
     ],
     "crewDispatch": "firstmate/crew-dispatch.json",
+    "crewDispatchClaude": "firstmate/crew-dispatch-claude.json",
     "captainPolicy": "firstmate/captain-branch-policy.md",
     "openwikiPolicy": "firstmate/captain-openwiki-policy.md",
     "tonePolicy": "firstmate/captain-tone-policy.md",
@@ -168,7 +169,7 @@
     "$comment3": "baseBranch: the integration branch ticket branches are cut from and merged back into (--base-branch overrides). The policy never targets the repository's default branch directly.",
     "backend": null,
     "tools": {
-      "$comment": "What firstmate's bootstrap reports as MISSING when absent; installed by step 11 exactly as firstmate's own `install:` hints say. npm ones go to npm's global prefix; the two scripts install into ~/.local/bin (treehouse picks it because it exists and is on PATH; no-mistakes via NO_MISTAKES_LINK_DIR), so no sudo. `setup hooks` (Claude Code/Codex/OpenCode session hooks) is deliberately not run: Pi does not use them and they write outside ~/.pi.",
+      "$comment": "What firstmate's bootstrap reports as MISSING when absent; installed by step 11 exactly as firstmate's own `install:` hints say. npm ones go to npm's global prefix; the two scripts install into ~/.local/bin (treehouse picks it because it exists and is on PATH; no-mistakes via NO_MISTAKES_LINK_DIR), so no sudo. When agent includes claude, step 11 also runs `*-axi setup hooks` (Claude SessionStart ambient context).",
       "npm": ["gh-axi", "chrome-devtools-axi", "lavish-axi", "tasks-axi", "quota-axi"],
       "scripts": {
         "treehouse": "https://kunchenguid.github.io/treehouse/install.sh",
@@ -285,6 +286,9 @@
       ".local/bin/hablo-fleet-reset",
       ".local/bin/bedrouter",
       ".hablo/hablo-captain.ts",
+      ".hablo/hablo-captain-prompt.sh",
+      ".hablo/crew-dispatch-pi.json",
+      ".hablo/crew-dispatch-claude.json",
       ".hablo/hablo-preflight",
       ".hablo/tone.md"
       ,".hablo/jira/config.json"

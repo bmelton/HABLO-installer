@@ -88,13 +88,9 @@ func (f *firstmatePage) save() {
 		f.form.err = "backend: " + err.Error()
 		return
 	}
-	if err := agent.WriteCrewHarness(f.paths.FirstmateDir, harness); err != nil {
-		f.form.err = "crew-harness: " + err.Error()
-		return
-	}
-	// Keep marker in sync when harness changes from this page.
-	if err := agent.Write(f.paths.AgentMarker, harness); err != nil {
-		f.form.err = "agent marker: " + err.Error()
+	// Marker + crew-harness + matching crew-dispatch (+ claude permission mode).
+	if err := agent.SetPreference(f.paths.AgentMarker, f.paths.FirstmateDir, harness); err != nil {
+		f.form.err = "agent/harness: " + err.Error()
 		return
 	}
 	if err := fileio.WriteBriefInclude(f.paths.FirstmateDir, f.brief.Value()); err != nil {
@@ -102,7 +98,7 @@ func (f *firstmatePage) save() {
 		return
 	}
 	f.form.err = ""
-	f.form.status = "saved backend, crew-harness, agent marker, brief-include"
+	f.form.status = "saved backend, crew-harness, dispatch, agent marker, brief-include"
 }
 
 func (f *firstmatePage) view() string {

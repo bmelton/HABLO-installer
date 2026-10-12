@@ -117,8 +117,8 @@ Interrogate and progress keep their existing `hablo.json` keys; Claude does not 
 - [x] Phase 1: install prompt + `--agent` + marker + receipt
 - [x] Phase 2: Claude + bedrouter settings + SessionStart
 - [x] Phase 3: HABLO Claude plugin (incl. TDD/interrogate skill surface)
-- [ ] Phase 4: firstmate/`hablo` + missing-Claude install-or-exit prompt
-- [ ] Phase 4b: Claude commit/PR → `hablo-jira` progress parity
+- [x] Phase 4: firstmate/`hablo` + missing-Claude install-or-exit prompt
+- [x] Phase 4b: Claude commit/PR → `hablo-jira` progress parity (plugin hooks in Phase 3)
 - [ ] Phase 6: E2E (voyage, TUI flip, missing binary, interrogate when on, commit/PR → Jira)
 - [ ] Phase 5 (optional later): guard with Pi
 
