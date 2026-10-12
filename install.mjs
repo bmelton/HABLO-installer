@@ -20,6 +20,7 @@
 //                    [--jira-env <path>]
 //                    [--skip-publish] [--publish-repo <owner/name>] [--publish-cred gh|env|auto]   team stats
 //                    [--skip-dream] [--dream-at HH:MM] [--no-dream-service]
+//                    [--interrogate|--no-interrogate]   override interrogate.enabled for this install (captain policy)
 //                    [--install-pi]   install the Pi CLI via https://pi.dev/install.sh when it is missing
 //
 // Steps (each prints what it did or would do):
@@ -48,6 +49,8 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { runUninstall } from "./uninstall.mjs";
+import { materializeSkill } from "./interrogate/overlay.mjs";
+import { fetchSkillFiles, loadSkillFixture } from "./interrogate/fetch.mjs";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const manifest = JSON.parse(fs.readFileSync(path.join(here, "hablo.json"), "utf8"));
@@ -936,6 +939,17 @@ else {
       captainBlock("MODEL-POLICY", fs.readFileSync(path.join(here, fm.modelPolicy), "utf8").trim() + "\n", "bedrouter model allowlist and brief-refusal / abort policy");
     } else removeCaptainBlock("MODEL-POLICY", "bedrouter model allowlist and brief-refusal / abort policy");
 
+    // Interrogate / plan mode: marked captain block when enabled; removed when false (skill fetch is a separate step).
+    // --interrogate / --no-interrogate override hablo.json for this run.
+    const iq = manifest.interrogate ?? {};
+    const iqEnabled = flag("interrogate") ? true : flag("no-interrogate") ? false : Boolean(iq.enabled);
+    const iqPolicyPath = path.join(here, iq.policy ?? "firstmate/captain-interrogate-policy.md");
+    if (iqEnabled && fs.existsSync(iqPolicyPath)) {
+      captainBlock("INTERROGATE-POLICY", fs.readFileSync(iqPolicyPath, "utf8").trim() + "\n", "interrogate / plan-mode policy");
+    } else {
+      removeCaptainBlock("INTERROGATE-POLICY", "interrogate / plan-mode policy");
+    }
+
     // firstmate's optional config/brief-include.md is appended verbatim to every ship/scout
     // brief as "# Home brief additions". HABLO owns a marked block so crewmates get Jira
     // reporting without the captain pasting captain.md into each brief.
@@ -1022,6 +1036,78 @@ else {
   const onPath = (process.env.PATH ?? "").split(path.delimiter).some((d) => d && path.resolve(expand(d)) === path.resolve(binDir));
   if (!onPath) note(`${binDir} is not on your PATH; add this to your shell rc:\n         export PATH="${binDir.replace(home, "$HOME")}:$PATH"`);
   for (const ext of ["fm-primary-turnend-guard.ts", "fm-primary-pi-watch.ts"]) if (fs.existsSync(fmDir) && !fs.existsSync(path.join(fmDir, ".pi", "extensions", ext))) note(`firstmate has no .pi/extensions/${ext} (upstream layout changed?); hablo skips missing extensions but the captain may lack supervision`);
+}
+
+// ---- 10b interrogate skill (pin fetch; hablo update re-runs this after a tag bump) --------------------------------------
+step("10b", "Interrogate TDD skill (pinned technical-design-doc)");
+{
+  const iq = manifest.interrogate ?? {};
+  const pin = iq.skill ?? {};
+  const skillDest = path.join(agentDir, "skills", "technical-design-doc");
+  const iqHome = path.join(expand(cli.home), "interrogate");
+  const runtimePath = path.join(expand(cli.home), "interrogate.json");
+  if (!pin.sha || !pin.repo || !pin.path) {
+    note("skipped (interrogate.skill pin incomplete in hablo.json)");
+  } else {
+    const adrSrc = path.join(here, iq.adrTemplate ?? "interrogate/adr-template.md");
+    const policySrc = path.join(here, iq.policy ?? "firstmate/captain-interrogate-policy.md");
+    if (!DRY) {
+      fs.mkdirSync(iqHome, { recursive: true, mode: 0o755 });
+      fs.mkdirSync(expand(cli.home), { recursive: true, mode: 0o755 });
+    }
+    if (fs.existsSync(adrSrc)) {
+      writeText(path.join(iqHome, "adr-template.md"), fs.readFileSync(adrSrc, "utf8"));
+      did(`install ${path.join(iqHome, "adr-template.md")}`);
+    }
+    if (fs.existsSync(policySrc)) {
+      writeText(path.join(iqHome, "policy.md"), fs.readFileSync(policySrc, "utf8"));
+      did(`install ${path.join(iqHome, "policy.md")}`);
+    }
+    const iqEnabled = flag("interrogate") ? true : flag("no-interrogate") ? false : Boolean(iq.enabled);
+    writeJson(runtimePath, {
+      enabled: iqEnabled,
+      skill: { host: pin.host, repo: pin.repo, path: pin.path, sha: pin.sha },
+      skillDest: homePath(skillDest),
+      updatedAt: new Date().toISOString(),
+    });
+    did(`render ${runtimePath} (enabled=${iqEnabled})`);
+
+    const fixture = process.env.HABLO_INTERROGATE_FIXTURE;
+    let fetched;
+    if (fixture) {
+      fetched = loadSkillFixture(fixture, { readFileSync: fs.readFileSync, existsSync: fs.existsSync });
+      if (fetched.ok) note(`using HABLO_INTERROGATE_FIXTURE=${fixture}`);
+    } else if (!which("gh")) {
+      fetched = { ok: false, error: "gh not on PATH" };
+    } else {
+      fetched = fetchSkillFiles(pin);
+    }
+    if (!fetched.ok) {
+      if (fs.existsSync(path.join(skillDest, "SKILL.md"))) {
+        warn(`interrogate skill fetch failed (${fetched.error}); keeping previously installed skill at ${homePath(skillDest)}`);
+      } else {
+        warn(`interrogate skill fetch failed (${fetched.error}); install enterprise gh auth for ${pin.host} and re-run, or set HABLO_INTERROGATE_FIXTURE`);
+      }
+    } else if (DRY) {
+      note(`would install skill at ${homePath(skillDest)} (pin ${pin.sha.slice(0, 12)}…)`);
+    } else {
+      fs.mkdirSync(skillDest, { recursive: true });
+      const priorSkill = fileState(path.join(skillDest, "SKILL.md"));
+      materializeSkill(skillDest, fetched.files, { mkdirSync: fs.mkdirSync.bind(fs), writeFileSync: fs.writeFileSync.bind(fs) });
+      // HABLO ADR template alongside upstream assets.
+      if (fs.existsSync(adrSrc)) fs.writeFileSync(path.join(skillDest, "assets", "adr-template.md"), fs.readFileSync(adrSrc));
+      const skillBody = fs.readFileSync(path.join(skillDest, "SKILL.md"));
+      record({
+        kind: priorSkill.exists ? "file.update" : "file.create",
+        path: homePath(path.join(skillDest, "SKILL.md")),
+        sha256: sha256(skillBody),
+        skillSha: pin.sha,
+        skillRepo: `${pin.host}/${pin.repo}`,
+        ...(priorSkill.sha256 ? { priorSha256: priorSkill.sha256 } : {}),
+      });
+      did(`install ${homePath(skillDest)} @ ${pin.sha.slice(0, 12)}…`);
+    }
+  }
 }
 
 // ---- 11 firstmate tools ----------------------------------------------------------------------------------------------------

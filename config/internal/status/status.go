@@ -32,6 +32,9 @@ func Collect(p paths.Paths) []Chip {
 	}
 	chips = append(chips, Chip{Name: "agent", Value: val, OK: ok})
 
+	iq := fileio.ReadInterrogate(p.Home)
+	chips = append(chips, Chip{Name: "interrogate", Value: fmt.Sprintf("enabled=%v", iq.Enabled), OK: true})
+
 	if _, err := os.Stat(p.JiraConfig); err != nil {
 		chips = append(chips, Chip{Name: "jira", Value: "missing config", OK: false})
 	} else if obj, err := fileio.LoadJiraObject(p.JiraConfig); err != nil {

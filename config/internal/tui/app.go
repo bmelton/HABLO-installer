@@ -20,6 +20,7 @@ const (
 	pageFirstmate
 	pageCLI
 	pageAgent
+	pageInterrogate
 )
 
 var homeItems = []struct {
@@ -33,6 +34,7 @@ var homeItems = []struct {
 	{"5", "Firstmate"},
 	{"6", "CLI defaults"},
 	{"7", "Agent"},
+	{"8", "Interrogate"},
 }
 
 // Model is the root Bubble Tea model.
@@ -47,6 +49,7 @@ type Model struct {
 	fm    *firstmatePage
 	cli   *cliPage
 	agent *agentPage
+	iq    *interrogatePage
 	width int
 	err   string
 }
@@ -70,6 +73,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.updateHome(msg)
 		}
 		if msg.String() == "esc" {
+			// Flush interrogate before leaving so the home chips match disk.
+			if m.page == pageInterrogate && m.iq != nil {
+				m.iq.save()
+			}
 			m.page = pageHome
 			m.err = ""
 			return m, nil
@@ -91,6 +98,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.cli.update(msg, &m)
 	case pageAgent:
 		return m.agent.update(msg, &m)
+	case pageInterrogate:
+		return m.iq.update(msg, &m)
 	}
 	return m, nil
 }
@@ -138,6 +147,9 @@ func (m Model) openPage(key string) (tea.Model, tea.Cmd) {
 	case "7":
 		m.page = pageAgent
 		m.agent = newAgentPage(m.paths)
+	case "8":
+		m.page = pageInterrogate
+		m.iq = newInterrogatePage(m.paths)
 	default:
 		return m, nil
 	}
@@ -160,6 +172,8 @@ func (m Model) View() string {
 		return m.cli.view()
 	case pageAgent:
 		return m.agent.view()
+	case pageInterrogate:
+		return m.iq.view()
 	default:
 		return m.viewHome()
 	}
@@ -190,7 +204,7 @@ func (m Model) viewHome() string {
 		}
 		b.WriteString(line + "\n")
 	}
-	b.WriteString("\n" + helpStyle.Render("↑↓/j k move · enter open · 1-7 jump · q quit"))
+	b.WriteString("\n" + helpStyle.Render("↑↓/j k move · enter open · 1-8 jump · q quit"))
 	if m.err != "" {
 		b.WriteString("\n" + errStyle.Render(m.err))
 	}

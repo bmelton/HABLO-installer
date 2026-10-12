@@ -63,6 +63,7 @@ Then: `pi --provider bedrouter --model auto`. For firstmate: `cd <your project> 
 | `--publish-cred gh\|env\|auto` | Where the publish token comes from. Answers the interactive question in advance, so an unattended run never blocks (default `auto`: `gh` when authenticated, else `BEDROUTER_PUBLISH_TOKEN`) |
 | `--skip-dream` | Skip the Dream binary, configuration, and timer |
 | `--dream-at HH:MM` `--no-dream-service` | Set the daily local run time (default `03:00`), or install Dream without activating its timer |
+| `--interrogate` `--no-interrogate` | Override `interrogate.enabled` for this install (captain plan-mode policy on/off); skill pin still fetches |
 | `--force-agents` | Overwrite existing agent profiles / workflows with the bundled ones |
 | `--dry-run` | Print, don't write |
 
@@ -275,8 +276,35 @@ It edits **existing runtime files as they are** (no machine overlay, no parallel
 | Firstmate | `config/backend`, `config/crew-harness`, `config/brief-include.md` |
 | CLI | stamped `DEFAULT_PROVIDER` / `DEFAULT_MODEL` in `hablo` (`HABLO_*` still wins at launch) |
 | Agent | `~/.hablo/agent` (`pi` or `claude`) plus `crew-harness`; warns if Claude is missing / not on `PATH`, but still saves. Does **not** install Claude Code |
+| Interrogate | `~/.hablo/interrogate.json` + captain `INTERROGATE-POLICY` block; does not re-fetch the skill pin (that is install / `hablo update`) |
 
 **Caveats:** the next `./install.sh` / `hablo update` may overwrite non-secret JSON rendered from `hablo.json`. There is no bedrouter stack/routing editor here (bedrouter owns that). `$comment*` keys are preserved where practical when saving JSON.
+
+## Interrogate / plan mode
+
+When `interrogate.enabled` is true (manifest, `--interrogate`, or `hablo config` → Interrogate), the captain must nudge a **senior-lead interview** and write a markdown TDD under `~/tdds/<TICKET>-<slug>/` before spawning implementers. The user may explicitly **skip interrogate**; silence is not a skip. Optional ADRs live in the same folder (`~/.hablo/interrogate/adr-template.md`).
+
+### Skill pin
+
+`hablo.json` pins the upstream coworker skill:
+
+```json
+"interrogate": {
+  "enabled": false,
+  "skill": {
+    "host": "github.boozallencsn.com",
+    "repo": "gray-rocky/agents",
+    "path": "skills/technical-design-doc",
+    "sha": "<full-commit-sha>"
+  }
+}
+```
+
+Every install / `hablo update` fetches that path at the pinned SHA (enterprise `gh` auth), applies a HABLO overlay (markdown-only; Pi chat instead of Cursor `AskUserQuestion`; no `.docx` / SharePoint), and installs to `~/.pi/agent/skills/technical-design-doc/`. Fetch failures **soft-fail**: warn and keep the previously installed skill.
+
+**Maintainer pin bump:** coworker lands upstream change → bump `interrogate.skill.sha` in a HABLO PR → tag a release → users run `hablo update`. Do not float on `main` without a pin bump.
+
+Offline / CI: set `HABLO_INTERROGATE_FIXTURE` to a directory with upstream `SKILL.md`, `assets/tdd-template.md`, and `references/diagrams.md`.
 
 ## Jira reporting and labelled-ticket dispatch
 
