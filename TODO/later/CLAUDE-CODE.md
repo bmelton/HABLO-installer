@@ -10,7 +10,7 @@
 > (plan mode / TDD), Progress (commit + PR → Jira), bedrouter Messages `auto`
 > (Phase 0a). Claude MVP extends those product rules; it does not redefine them.
 
-- [ ] [Agent selection](CLAUDE-CODE-AGENT-SELECTION.md): the install-time prompt, `--agent`, and the per-agent step table
+- [x] [Agent selection](CLAUDE-CODE-AGENT-SELECTION.md): the install-time prompt, `--agent`, marker, receipt (manifest `agents.pi` move deferred)
 - [ ] [Routing](CLAUDE-CODE-ROUTING.md): Claude Code reaches Bedrock through bedrouter
 - [ ] [Plugin](CLAUDE-CODE-PLUGIN.md): agents, commands, skills and workflows as one installable unit (incl. TDD/interrogate skill when enabled)
 - [ ] [firstmate](CLAUDE-CODE-FIRSTMATE.md): the `claude` crew harness, the permission posture, and the `hablo` wrapper (captain prompt carries interrogate + progress duties)

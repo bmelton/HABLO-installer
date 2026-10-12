@@ -134,6 +134,40 @@ exec ${JSON.stringify(realNode)} "$@"
   };
 }
 
+test("agent selection writes marker, tags receipt, and refuses claude+oss ladder", () => {
+  const f = fixture();
+  try {
+    const out = install(f);
+    assert.match(out, /agent=pi \(from defaults\)/);
+    assert.equal(fs.readFileSync(path.join(f.home, ".hablo", "agent"), "utf8").trim(), "pi");
+    const receipt = JSON.parse(fs.readFileSync(path.join(f.home, ".hablo", "receipt.json"), "utf8"));
+    const run = receipt.runs.at(-1);
+    assert.equal(run.agent, "pi");
+    assert.equal(run.activeAgent, "pi");
+    assert.ok(run.actions.length > 0);
+    assert.ok(run.actions.every((a) => a.agent === "pi"), "every action is tagged with install agent");
+
+    let refused = "";
+    try {
+      install(f, ["--agent", "claude", "--ladder", "oss"]);
+    } catch (e) {
+      refused = `${e.stdout ?? ""}${e.stderr ?? ""}`;
+    }
+    assert.match(refused, /cannot use --ladder oss/);
+
+    const both = install(f, ["--agent", "both"]);
+    assert.match(both, /agent=both \(from flag\)/);
+    assert.match(both, /Claude Code side uses ladder=claude/);
+    assert.equal(fs.readFileSync(path.join(f.home, ".hablo", "agent"), "utf8").trim(), "pi");
+    assert.equal(fs.readFileSync(path.join(f.firstmate, "config", "crew-harness"), "utf8").trim(), "pi");
+    const bothRun = JSON.parse(fs.readFileSync(path.join(f.home, ".hablo", "receipt.json"), "utf8")).runs.at(-1);
+    assert.equal(bothRun.agent, "both");
+    assert.equal(bothRun.activeAgent, "pi");
+  } finally {
+    fs.rmSync(f.dir, { recursive: true, force: true });
+  }
+});
+
 test("Wave 0 installs and disables tone policy while appending receipt runs", () => {
   const f = fixture();
   try {

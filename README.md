@@ -35,8 +35,11 @@ Then: `pi --provider bedrouter --model auto`. For firstmate: `cd <your project> 
 
 | Flag | Meaning |
 | --- | --- |
+| `--agent pi\|claude\|both` | Coding agent(s) to configure. Default `pi` (`defaults.agent`). On a TTY without the flag, the installer prompts (Return keeps the default). Writes `~/.hablo/agent` (`pi` or `claude`; `both` defaults the active preference to `pi`) for `hablo-config`, tags the uninstall receipt, and skips Pi-only steps when the selection does not include Pi. Claude routing/plugin/`hablo` launch land in later phases |
+| `--ladder oss\|claude` | Model ladder hint. Default `oss`. `--agent claude --ladder oss` is refused (Messages vs chat/completions). With `--agent both --ladder oss`, Pi keeps oss and Claude uses the claude ladder |
 | `--profile <name>` | AWS profile for bedrouter (`AWS_PROFILE` in `~/.bedrouter/.env`). Default `bedrouter` (`defaults.profile` in the manifest; `AWS_PROFILE` in the environment wins over that). Any SSO profile works; the name is whatever `aws configure sso` produced |
 | `--install-pi` | Install the Pi CLI via `https://pi.dev/install.sh` if `pi` is not on PATH; a no-op when it is. Uses Pi's managed layout under `~/.pi/agent/install` (pinned deps, `pi update`) so the CLI is not tied to the active nvm Node. If the symlink dir is not on PATH, the installer still finds `pi` for the rest of the run and prints the `export PATH=…` line to add to your shell rc |
+| `--install-claude` | When Claude is selected but missing from PATH, print an install reminder (native Claude Code installer; settings wiring is Phase 2) |
 | `--restore <tgz>` | Step 0: restore a `backup` archive (see below) |
 | `--force-restore` | Let the restore overwrite files that already exist |
 | `--default-model` | Make `bedrouter/auto` Pi's default model, not just the auto-selected one |

@@ -114,7 +114,7 @@ Interrogate and progress keep their existing `hablo.json` keys; Claude does not 
 - [x] Interrogate on Pi (`INTERROGATE-PLAN.md` (workspace backlog))
 - [x] Progress on Pi (`PROGRESS-UPDATE-PLAN.md` (workspace backlog))
 - [ ] Live Claude+SSO streaming `tool_use` smoke against bedrouter
-- [ ] Phase 1: install prompt + `--agent` + marker + receipt
+- [x] Phase 1: install prompt + `--agent` + marker + receipt
 - [ ] Phase 2: Claude + bedrouter settings + SessionStart
 - [ ] Phase 3: HABLO Claude plugin (incl. TDD/interrogate skill surface)
 - [ ] Phase 4: firstmate/`hablo` + missing-Claude install-or-exit prompt

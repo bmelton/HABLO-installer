@@ -8,17 +8,18 @@
 > marker, and making install steps conditional. Runtime TUI flip must edit the
 > same on-disk default this feature introduces.
 
-- [ ] Add `defaults.agent` to `hablo.json`
-- [ ] Move the Pi-only manifest keys under an `agents.pi` block, add `agents.claude`
-- [ ] Add the `--agent pi|claude|both` flag and the usage header line
-- [ ] Write the detection helper (`pi` and `claude` on PATH, with versions)
-- [ ] Write the interactive prompt, TTY-gated, pre-selecting the resolved default
-- [ ] Make steps 1, 2, 3, 4, 7, 8, 9, 10, 11 agent-conditional
-- [ ] Refuse `--ladder oss` together with `--agent claude`, and say why
-- [ ] Record the chosen agent in the uninstall receipt
-- [ ] Tag every created artifact in the receipt with the agent that owns it
-- [ ] Update the `Done` footer to print the right next-step commands per agent
-- [ ] `README.md`: the flag, the prompt, and the per-agent step table
+- [x] Add `defaults.agent` to `hablo.json` (and `defaults.ladder`)
+- [ ] Move the Pi-only manifest keys under an `agents.pi` block (deferred; `agents.claude` stub present; `pi` stays top-level)
+- [x] Add the `--agent pi|claude|both` flag and the usage header line
+- [x] Write the detection helper (`pi` and `claude` on PATH, with versions)
+- [x] Write the interactive prompt, TTY-gated, pre-selecting the resolved default
+- [x] Make steps 1, 2, 3, 4, 7, 8, 9, 10, 11 agent-conditional (Pi-only steps skip when agent excludes Pi; Claude settings/plugin still Phase 2+)
+- [x] Refuse `--ladder oss` together with `--agent claude`, and say why
+- [x] Record the chosen agent in the uninstall receipt (`run.agent` / `run.activeAgent`)
+- [x] Tag every created artifact in the receipt with the agent that owns it
+- [x] Update the `Done` footer to print the right next-step commands per agent
+- [x] `README.md`: the flag, the prompt, and agent column notes
+- [x] Write `~/.hablo/agent` marker (same path as `hablo-config`)
 
 ## What this is
 

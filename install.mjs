@@ -7,8 +7,8 @@
 //   node install.mjs backup [--to <dir>] [--with-history]   archive auth + trust (+ config; + sessions/caches/logs with the flag)
 //   node install.mjs uninstall [--yes] [--with-state] [--with-globals] [--with-firstmate]
 //                              [--with-services] [--remove-pi] [--all] [--no-backup] [--infer] [--receipt <path>]
-//   node install.mjs [--profile <aws-profile>] [--restore <tgz>] [--dry-run] [--optional] [--default-model]
-//                    (profile defaults to hablo.json; AWS_PROFILE in the environment also counts)
+//   node install.mjs [--agent pi|claude|both] [--ladder oss|claude] [--profile <aws-profile>] [--restore <tgz>] [--dry-run] [--optional] [--default-model]
+//                    (agent/profile/ladder default to hablo.json; AWS_PROFILE in the environment also counts)
 //                    [--skip-aws] [--skip-probe] [--skip-agents] [--force-agents] [--home <dir>]
 //                    [--skip-firstmate] [--no-firstmate-pull] [--firstmate-dir <dir>] [--backend tmux|herdr] [--no-branch-policy] [--base-branch <name>]
 //                    [--no-openwiki-policy] [--no-model-policy] [--nautical|--no-tone-policy]
@@ -22,6 +22,7 @@
 //                    [--skip-dream] [--dream-at HH:MM] [--no-dream-service]
 //                    [--interrogate|--no-interrogate]   override interrogate.enabled for this install (captain policy)
 //                    [--install-pi]   install the Pi CLI via https://pi.dev/install.sh when it is missing
+//                    [--install-claude]   remind how to install Claude Code when it is missing (native installer; Phase 2 wires settings)
 //
 // Steps (each prints what it did or would do):
 //   0 restore     with --restore <tgz>: put personal state back (never overwrites an existing file unless --force-restore)
@@ -68,12 +69,26 @@ const defaults = manifest.defaults ?? {};
 const profile = opt("profile", process.env.AWS_PROFILE ?? defaults.profile ?? "");
 const toneEnabled = !flag("nautical") && !flag("no-tone-policy");
 const stamp = () => new Date().toISOString().replace(/[:T]/g, "-").slice(0, 16);
+const habloHome = expand(manifest.cli?.home ?? "~/.hablo");
+const agentMarkerPath = path.join(habloHome, "agent");
 
 const log = (s) => console.log(s);
 const step = (n, title) => log(`\n[${n}] ${title}`);
 const did = (s) => log(`  ${DRY ? "would " : ""}${s}`);
 const note = (s) => log(`  ${s}`);
 function fail(msg) { console.error(`\nERROR: ${msg}`); process.exit(1); }
+
+/** Sync line from a TTY (or stdin); never blocks a non-TTY script. */
+function askOnce(question, fallback = "") {
+  if (DRY || !process.stdin.isTTY) return fallback;
+  process.stdout.write(question);
+  try {
+    const buf = Buffer.alloc(256);
+    const n = fs.readSync(0, buf, 0, 256, null);
+    return buf.toString("utf8", 0, n).trim() || fallback;
+  } catch { return fallback; }
+}
+
 // Non-fatal problems in the AWS/probe steps: later steps (agents, firstmate, hablo) do not depend on them, so keep going.
 const warnings = [];
 function warn(msg) { warnings.push(msg); note(`WARNING: ${msg}`); }
@@ -82,6 +97,13 @@ const readJsonText = (text, fallback = null) => { try { return JSON.parse(text);
 const sha256 = (value) => crypto.createHash("sha256").update(value).digest("hex");
 let receipt;
 let receiptRun;
+let installAgent = "pi";
+let agentSource = "defaults";
+let wantsPi = true;
+let wantsClaude = false;
+let activeAgent = "pi";
+let piLadder = "oss";
+let claudeLadder = null;
 const receiptPath = expand(manifest.receipt?.path ?? "~/.hablo/receipt.json");
 function flushReceipt() {
   if (DRY || !receipt || !receiptRun) return;
@@ -93,7 +115,7 @@ function flushReceipt() {
 }
 function record(action) {
   if (DRY || !receiptRun) return;
-  receiptRun.actions.push(action);
+  receiptRun.actions.push({ agent: installAgent, ...action });
   flushReceipt();
 }
 function recordMany(actions) { for (const action of actions) record(action); }
@@ -119,6 +141,59 @@ function writeText(p, text, options = {}) {
 function writeJson(p, obj, options) { writeText(p, JSON.stringify(obj, null, 2) + "\n", options); }
 const which = (cmd) => { const r = spawnSync(process.platform === "win32" ? "where" : "which", [cmd], { encoding: "utf8" }); return r.status === 0 ? r.stdout.trim().split("\n")[0] : undefined; };
 const run = (cmd, a, o = {}) => spawnSync(cmd, a, { encoding: "utf8", stdio: o.inherit ? "inherit" : "pipe", cwd: o.cwd, env: { ...process.env, ...o.env }, timeout: o.timeout ?? 300_000 });
+
+function toolVersion(cmd) {
+  if (!which(cmd)) return null;
+  const r = run(cmd, ["--version"], { timeout: 15_000 });
+  return (r.stdout || r.stderr || "").trim().split("\n")[0] || "version unknown";
+}
+
+function resolveInstallAgent() {
+  const raw = opt("agent", "");
+  const def = ["pi", "claude", "both"].includes(defaults.agent) ? defaults.agent : "pi";
+  if (raw) {
+    if (!["pi", "claude", "both"].includes(raw)) fail(`--agent must be pi, claude, or both (got ${JSON.stringify(raw)})`);
+    return { agent: raw, source: "flag" };
+  }
+  if (process.stdin.isTTY && !DRY) {
+    const piVer = toolVersion("pi");
+    const claudeVer = toolVersion("claude");
+    const pre = def === "claude" ? "2" : def === "both" ? "3" : "1";
+    log("\nWhich coding agent would you like to use?");
+    log(`  1) Pi Coding Agent${piVer ? ` (already installed: ${piVer})` : ""}`);
+    log(`  2) Claude Code${claudeVer ? ` (already installed: ${claudeVer})` : ""}`);
+    log("  3) Both");
+    const ans = askOnce(`Choice [1/2/3] (default ${pre}=${def}): `, pre);
+    const map = { 1: "pi", 2: "claude", 3: "both", pi: "pi", claude: "claude", both: "both" };
+    const picked = map[ans.toLowerCase()];
+    if (!picked) fail(`unrecognized agent choice ${JSON.stringify(ans)}; pass --agent pi|claude|both`);
+    return { agent: picked, source: "prompt" };
+  }
+  return { agent: def, source: "defaults" };
+}
+
+function applyInstallAgent() {
+  const resolved = resolveInstallAgent();
+  installAgent = resolved.agent;
+  agentSource = resolved.source;
+  wantsPi = installAgent === "pi" || installAgent === "both";
+  wantsClaude = installAgent === "claude" || installAgent === "both";
+  activeAgent = installAgent === "claude" ? "claude" : "pi";
+  const ladderFlag = opt("ladder", "");
+  const ladderDefault = defaults.ladder ?? "oss";
+  const ladderExplicit = Boolean(ladderFlag);
+  const ladderChosen = ladderFlag || ladderDefault;
+  if (installAgent === "claude" && ladderExplicit && ladderChosen === "oss") {
+    fail(`--agent claude cannot use --ladder oss: Claude Code speaks bedrouter's /v1/messages API, and the oss auto alias is served on /v1/chat/completions. Omit --ladder (Claude side uses the claude ladder) or pass --ladder claude.`);
+  }
+  piLadder = wantsPi ? (ladderChosen === "claude" ? "claude" : "oss") : null;
+  claudeLadder = wantsClaude ? "claude" : null;
+  if (wantsClaude && (!ladderExplicit || ladderChosen === "oss")) {
+    note(`agent=${installAgent}: Claude Code side uses ladder=claude (Messages /v1/messages)${installAgent === "both" && ladderChosen === "oss" ? "; Pi side keeps ladder=oss" : ""}`);
+  }
+  note(`agent=${installAgent} (from ${agentSource}); active preference=${activeAgent}`);
+}
+
 // Keep Go caches off the install HOME. Installer tests override HOME to a temp fixture; `go build` of
 // hablo-config would otherwise drop read-only module files under $HOME/go/pkg/mod and break fixture cleanup.
 const goEnv = {
@@ -365,12 +440,24 @@ function printPrerequisites(items) {
 if (args[0] === "check") {
   process.exit(printPrerequisites(prerequisites()).blocked ? 1 : 0);
 }
+
+applyInstallAgent();
+
 {
   const items = prerequisites();
   const { blocked } = printPrerequisites(items);
   for (const i of items.filter((x) => !x.ok && x.level === "recommended")) warnings.push(`${i.label}: ${i.fix.text}`);
   if (blocked && !DRY) fail(`${blocked} required prerequisite(s) missing (above). Fix them and re-run, or run \`node install.mjs check\` to re-check.`);
   if (blocked) note("(dry run continues; a real run stops here)");
+  if (wantsClaude && !which("claude")) {
+    const tip = flag("install-claude")
+      ? "install Claude Code (https://docs.anthropic.com/en/docs/claude-code), then re-run"
+      : "Claude Code is not on PATH; preference will still be saved. Install it (or pass --install-claude for a reminder) before `hablo` with agent=claude";
+    warn(tip);
+  }
+  if (wantsClaude) {
+    note("Claude Code routing/plugin/hablo launch branch land in later phases; this install records agent preference + shared bedrouter/firstmate machinery");
+  }
 }
 
 // ---- 0 restore ---------------------------------------------------------------------------------------------------------
@@ -419,10 +506,23 @@ if (!DRY) {
     at: new Date().toISOString(),
     installer: `HABLO-installer@${rev.status === 0 ? rev.stdout.trim() : "unknown"}${dirty.status === 0 && dirty.stdout.trim() ? "+dirty" : ""}`,
     argv: [...args],
+    agent: installAgent,
+    activeAgent,
     actions: [],
   };
   receipt.runs.push(receiptRun);
   flushReceipt();
+}
+
+// Runtime preference for hablo-config / hablo (pi|claude). `both` installs shared+Pi today and defaults active to pi.
+{
+  step("0b", "agent preference");
+  const prior = fs.existsSync(agentMarkerPath) ? fs.readFileSync(agentMarkerPath, "utf8").trim() : "";
+  if (prior === activeAgent) note(`${agentMarkerPath} already ${activeAgent} (installAgent=${installAgent})`);
+  else {
+    writeText(agentMarkerPath, activeAgent + "\n");
+    did(`write ${agentMarkerPath} = ${activeAgent} (installAgent=${installAgent})`);
+  }
 }
 
 // ---- 1 preflight ---------------------------------------------------------------------------------------------
@@ -506,28 +606,31 @@ if (!piBin && flag("install-pi")) {
     }
   }
 }
-if (!piBin && !DRY) fail(`pi is not installed. Re-run with --install-pi, or install it yourself:  curl -fsSL ${cliInstallUrl} | sh`);
-note(piBin ? `pi   ${run("pi", ["--version"]).stdout?.trim() || piBin}` : `pi   would be installed (${cliInstallUrl})`);
+if (wantsPi && !piBin && !DRY) fail(`pi is not installed. Re-run with --install-pi, or install it yourself:  curl -fsSL ${cliInstallUrl} | sh`);
+if (wantsPi) note(piBin ? `pi   ${run("pi", ["--version"]).stdout?.trim() || piBin}` : `pi   would be installed (${cliInstallUrl})`);
+else note("pi   skipped (agent does not include pi)");
+if (wantsClaude) note(which("claude") ? `claude   ${toolVersion("claude")}` : "claude   not on PATH (preference still saved)");
 const awsBin = which("aws");
 const goBin = which("go");
-
-// ---- 2 packages ------------------------------------------------------------------------------------------------
-step(2, "pi packages");
 const settingsPath = path.join(agentDir, "settings.json");
-let settings = readJson(settingsPath, {});
-const installed = new Set(settings.packages ?? []);
-// Everything the manifest asks for, plus anything settings.json already lists (packages you added yourself): after a
-// reinstall the list survives in settings/dotfiles but the code under npm's global root does not, so honour the list.
-const listedRemote = [...installed].filter((p) => /^(npm|git):/.test(p));
 const bareOf = (pkg) => pkg.replace(/^npm:/, "").replace(/@[^@/]+$/, "").replace(/^git:.*\/([^/@]+?)(?:\.git)?(?:@.*)?$/, "$1");
 const pinOf = (pkg) => { if (!pkg.startsWith("npm:")) return undefined; const s = pkg.slice(4), i = s.lastIndexOf("@"); return i > 0 ? s.slice(i + 1) : undefined; };
-// Pi installs user npm packages with `npm install -g` (see `pi` docs/packages.md). Older Pi used ~/.pi/agent/npm.
 const npmGlobalRoot = () => (run("npm", ["root", "-g"]).stdout || "").trim();
 const resolvePiNpmPackage = (bare) => {
   const root = npmGlobalRoot();
   const candidates = [root ? path.join(root, bare) : "", path.join(agentDir, "npm", "node_modules", bare)].filter(Boolean);
   return candidates.find((d) => fs.existsSync(path.join(d, "package.json")));
 };
+
+// ---- 2 packages ------------------------------------------------------------------------------------------------
+step(2, "pi packages");
+let settings = readJson(settingsPath, {});
+if (!wantsPi) note("skipped (agent does not include pi)");
+else {
+const installed = new Set(settings.packages ?? []);
+// Everything the manifest asks for, plus anything settings.json already lists (packages you added yourself): after a
+// reinstall the list survives in settings/dotfiles but the code under npm's global root does not, so honour the list.
+const listedRemote = [...installed].filter((p) => /^(npm|git):/.test(p));
 // One entry per package name, the manifest first: settings.json still lists the previous release's pin after an
 // update, and installing that entry too would put the old version straight back.
 const byName = new Map();
@@ -574,9 +677,12 @@ for (const pkg of wanted) {
   }
 }
 settings = readJson(settingsPath, settings); // pi install rewrites it
+}
 
 // ---- 3 settings -------------------------------------------------------------------------------------------------
 step(3, "pi settings");
+if (!wantsPi) note("skipped (agent does not include pi)");
+else {
 const settingsExisted = fs.existsSync(settingsPath);
 const settingsActions = [];
 // Only extend an allowlist that already exists: creating one would hide every non-bedrouter provider.
@@ -616,28 +722,31 @@ if (settingsActions.length) {
   if (!settingsExisted) record({ kind: "file.create", path: homePath(settingsPath), sha256: sha256(settingsText) });
   recordMany(settingsActions);
 }
+}
 
 // ---- 4 bedrouter -------------------------------------------------------------------------------------------------
 step(4, "bedrouter");
 const pbPath = path.join(agentDir, "pi-bedrouter.json");
-const pbExisted = fs.existsSync(pbPath);
-const pb = readJson(pbPath, {});
-const pbNext = { ...pb, home: opt("home", manifest.bedrouter.home), port: manifest.bedrouter.port, debug: pb.debug ?? false, stopOnExit: pb.stopOnExit ?? "if-started-here" };
-delete pbNext.path; // the binary comes from the npm dependency
-delete pbNext.autoSelect; // 0.6 has one auto model and no per-family selection setting
-if (JSON.stringify(pb) !== JSON.stringify(pbNext)) {
-  const pbText = JSON.stringify(pbNext, null, 2) + "\n";
-  const actions = [];
-  for (const [key, value] of Object.entries(pbNext)) if (pb[key] !== value) actions.push({ kind: "json.set", path: homePath(pbPath), key, value, prior: pb[key] ?? null, priorPresent: Object.hasOwn(pb, key), sha256: sha256(pbText) });
-  if (Object.hasOwn(pb, "path")) actions.push({ kind: "json.delete", path: homePath(pbPath), key: "path", prior: pb.path, priorPresent: true, sha256: sha256(pbText) });
-  if (Object.hasOwn(pb, "autoSelect")) actions.push({ kind: "json.delete", path: homePath(pbPath), key: "autoSelect", prior: pb.autoSelect, priorPresent: true, sha256: sha256(pbText) });
-  writeJson(pbPath, pbNext, { record: false });
-  if (!pbExisted) record({ kind: "file.create", path: homePath(pbPath), sha256: sha256(pbText) });
-  recordMany(actions);
-  did(`write ${pbPath} (home ${pbNext.home}; migrated away autoSelect)`);
-} else note(`${pbPath} up to date`);
+if (wantsPi) {
+  const pbExisted = fs.existsSync(pbPath);
+  const pb = readJson(pbPath, {});
+  const pbNext = { ...pb, home: opt("home", manifest.bedrouter.home), port: manifest.bedrouter.port, debug: pb.debug ?? false, stopOnExit: pb.stopOnExit ?? "if-started-here" };
+  delete pbNext.path; // the binary comes from the npm dependency
+  delete pbNext.autoSelect; // 0.6 has one auto model and no per-family selection setting
+  if (JSON.stringify(pb) !== JSON.stringify(pbNext)) {
+    const pbText = JSON.stringify(pbNext, null, 2) + "\n";
+    const actions = [];
+    for (const [key, value] of Object.entries(pbNext)) if (pb[key] !== value) actions.push({ kind: "json.set", path: homePath(pbPath), key, value, prior: pb[key] ?? null, priorPresent: Object.hasOwn(pb, key), sha256: sha256(pbText) });
+    if (Object.hasOwn(pb, "path")) actions.push({ kind: "json.delete", path: homePath(pbPath), key: "path", prior: pb.path, priorPresent: true, sha256: sha256(pbText) });
+    if (Object.hasOwn(pb, "autoSelect")) actions.push({ kind: "json.delete", path: homePath(pbPath), key: "autoSelect", prior: pb.autoSelect, priorPresent: true, sha256: sha256(pbText) });
+    writeJson(pbPath, pbNext, { record: false });
+    if (!pbExisted) record({ kind: "file.create", path: homePath(pbPath), sha256: sha256(pbText) });
+    recordMany(actions);
+    did(`write ${pbPath} (home ${pbNext.home}; migrated away autoSelect)`);
+  } else note(`${pbPath} up to date`);
+} else note(`${pbPath} skipped (agent does not include pi; Claude uses ~/.claude settings env in Phase 2)`);
 
-const brCli = (() => {
+let brCli = (() => {
   const root = npmGlobalRoot();
   const piBed = resolvePiNpmPackage("pi-bedrouter");
   const candidates = [
@@ -648,7 +757,21 @@ const brCli = (() => {
   ].filter(Boolean);
   return candidates.find((p) => fs.existsSync(p)) ?? candidates[0];
 })();
-if (!fs.existsSync(brCli) && !DRY) fail(`bedrouter binary not found at ${brCli}; did pi install npm:pi-bedrouter succeed?`);
+if (!brCli || !fs.existsSync(brCli)) {
+  if (wantsPi && !DRY) fail(`bedrouter binary not found at ${brCli}; did pi install npm:pi-bedrouter succeed?`);
+  // Claude-only (or dry-run): install the published bedrouter package globally so ~/.bedrouter still works.
+  const pin = (manifest.pi.packages.find((p) => p.includes("pi-bedrouter@")) || "npm:pi-bedrouter@0.10.0").replace(/^npm:pi-bedrouter@/, "");
+  const brPin = `bedrouter@${pin}`;
+  did(`npm install -g ${brPin}  (shared bedrouter for agent=${installAgent})`);
+  if (!DRY) {
+    const r = run("npm", ["install", "-g", brPin], { inherit: true, timeout: 600_000 });
+    if (r.status !== 0) fail(`npm install -g ${brPin} failed (exit ${r.status})`);
+    record({ kind: "npm.global", name: brPin, wasPresent: false });
+    const root = npmGlobalRoot();
+    brCli = root ? path.join(root, "bedrouter", "dist", "cli.js") : brCli;
+    if (!fs.existsSync(brCli)) fail(`bedrouter binary still missing at ${brCli} after npm install -g ${brPin}`);
+  }
+}
 const envPath = path.join(brHome, ".env");
 if (!fs.existsSync(envPath)) {
   const lines = [`AWS_REGION=${manifest.bedrouter.region}`];
@@ -684,13 +807,6 @@ const publishRepo = publishRepoFlag || pubManifest.repo || "";
 // Naming a repo on the command line is itself the opt-in; otherwise the manifest decides.
 const publishOn = !flag("skip-publish") && !!publishRepo && (publishRepoFlag ? true : pubManifest.enabled !== false);
 const ghToken = () => { const r = run("gh", ["auth", "token", "--hostname", "github.com"]); return r.status === 0 ? r.stdout.trim() : ""; };
-const askOnce = (question, fallback) => {
-  // Only a TTY is ever asked, so an unattended run never blocks. --publish-cred answers it in advance.
-  if (DRY || !process.stdin.isTTY) return fallback;
-  process.stdout.write(question);
-  try { const buf = Buffer.alloc(256); const n = fs.readSync(0, buf, 0, 256, null); return buf.toString("utf8", 0, n).trim(); }
-  catch { return fallback; }
-};
 let publishCred = opt("publish-cred", "");
 if (publishOn && !publishCred) {
   publishCred = pubManifest.credential ?? "auto";
@@ -819,7 +935,8 @@ function probeStep() {
 
 // ---- 7 agents + workflows -------------------------------------------------------------------------------------------------
 step(7, "agent profiles and workflows");
-if (flag("skip-agents")) note("skipped (--skip-agents)");
+if (!wantsPi) note("skipped (agent does not include pi)");
+else if (flag("skip-agents")) note("skipped (--skip-agents)");
 else {
   const copyDir = (src, dst) => {
     if (!fs.existsSync(src)) return;
@@ -837,6 +954,8 @@ else {
 
 // ---- 8 fit notes ------------------------------------------------------------------------------------------------------------
 step(8, "pi-agents model notes");
+if (!wantsPi) note("skipped (agent does not include pi)");
+else {
 const wfPath = path.join(agentDir, "workflows.json");
 const wfExisted = fs.existsSync(wfPath);
 const wf = readJson(wfPath, {});
@@ -856,6 +975,7 @@ if (noteActions.length) {
   recordMany(noteActions);
   did(`write ${Object.keys(notes).length} model notes to ${wfPath}`);
 } else note("model notes up to date");
+}
 
 // ---- 9 firstmate --------------------------------------------------------------------------------------------------------------
 step(9, "firstmate (kunchenguid/firstmate)");
@@ -883,11 +1003,18 @@ else {
     }
   }
   if (fs.existsSync(fmDir) || DRY) {
-    // The dispatch names the Pi harness. The captain's per-voyage system-prompt block supplies the exact provider/id
-    // string that firstmate passes as --model, so separate voyages never share model state on disk.
+    // Active agent preference (from --agent / prompt) wins over the static manifest crewHarness default.
+    const crewHarness = activeAgent;
     const chPath = path.join(fmDir, "config", "crew-harness");
     const cur = fs.existsSync(chPath) ? fs.readFileSync(chPath, "utf8").trim() : "";
-    if (cur !== fm.crewHarness) { writeText(chPath, fm.crewHarness + "\n"); did(`write ${path.relative(home, chPath)} = ${fm.crewHarness}`); } else note(`crew harness already ${cur}`);
+    if (cur !== crewHarness) { writeText(chPath, crewHarness + "\n"); did(`write ${path.relative(home, chPath)} = ${crewHarness}`); } else note(`crew harness already ${cur}`);
+    if (crewHarness === "claude") {
+      const permPath = path.join(fmDir, "config", "claude-permission-mode");
+      const wantPerm = "auto";
+      const curPerm = fs.existsSync(permPath) ? fs.readFileSync(permPath, "utf8").trim() : "";
+      if (curPerm !== wantPerm) { writeText(permPath, wantPerm + "\n"); did(`write ${path.relative(home, permPath)} = ${wantPerm}`); }
+      else note(`claude-permission-mode already ${curPerm}`);
+    }
     // When this file exists fm-spawn refuses any spawn without a resolved harness, by design.
     const dispatch = fs.readFileSync(path.join(here, fm.crewDispatch), "utf8");
     const dispatchPath = path.join(fmDir, "config", "crew-dispatch.json");
@@ -993,7 +1120,8 @@ else {
 step(10, "hablo command (firstmate from any project directory)");
 const cli = manifest.cli;
 const binDir = expand(opt("bin-dir", cli.binDir));
-const habloHome = expand(cli.home);
+// habloHome already resolved from manifest.cli.home near the top (agent marker path).
+if (expand(cli.home) !== habloHome) note(`cli.home ${expand(cli.home)} differs from early habloHome ${habloHome}; using ${habloHome}`);
 // Copied, not symlinked: wrappers must keep working if this installer checkout moves or goes away.
 const installFile = (src, dst, transform, mode) => {
   const next = transform(fs.readFileSync(src, "utf8"));
@@ -1058,9 +1186,10 @@ step("10b", "Interrogate TDD skill (pinned technical-design-doc)");
   const iq = manifest.interrogate ?? {};
   const pin = iq.skill ?? {};
   const skillDest = path.join(agentDir, "skills", "technical-design-doc");
-  const iqHome = path.join(expand(cli.home), "interrogate");
-  const runtimePath = path.join(expand(cli.home), "interrogate.json");
-  if (!pin.sha || !pin.repo || !pin.path) {
+  const iqHome = path.join(habloHome, "interrogate");
+  const runtimePath = path.join(habloHome, "interrogate.json");
+  if (!wantsPi) note("Pi skill tree skipped (agent does not include pi); Claude TDD skill lands with the plugin in Phase 3");
+  else if (!pin.sha || !pin.repo || !pin.path) {
     note("skipped (interrogate.skill pin incomplete in hablo.json)");
   } else {
     const adrSrc = path.join(here, iq.adrTemplate ?? "interrogate/adr-template.md");
@@ -1159,7 +1288,8 @@ else {
       else record({ kind: "script.install", name: t, source: url, wasPresent });
     }
   }
-  note("(the *-axi `setup hooks` step is not run: it installs Claude Code/Codex/OpenCode session hooks, which Pi does not use)");
+  if (wantsClaude) note("(Claude Code selected: *-axi `setup hooks` still deferred — those hooks write Claude/Codex/OpenCode session config; enable when Phase 2+ lands)");
+  else note("(the *-axi `setup hooks` step is not run: it installs Claude Code/Codex/OpenCode session hooks, which Pi does not use)");
 }
 
 // ---- 13 Jira reporting and dispatch -------------------------------------------------------------------------------------
@@ -1315,5 +1445,23 @@ if (!goBin || !versionGte((run("go", ["version"]).stdout ?? "").match(/go(\d+\.\
 
 // ---- done ---------------------------------------------------------------------------------------------------------------
 log(`\nDone${DRY ? " (dry run; nothing written)" : ""}${warnings.length ? ` with ${warnings.length} warning(s):\n  - ${warnings.join("\n  - ")}` : ""}.`);
-log(`Next:\n  pi --provider bedrouter --model auto\n  bedrouter doctor --probe\n  /bedrouter status      /bedrouter probe      /bedrouter report\n  in a repo with a wiki: /openwiki doctor${flag("skip-firstmate") ? "" : `\n  firstmate: cd <your project> && hablo       -  or cd ${fmDir} && pi`}\n  hablo config            - edit Jira / secrets / Dream / Agent (runtime files)`);
+{
+  const next = ["  bedrouter doctor --probe"];
+  if (wantsPi) {
+    next.unshift("  pi --provider bedrouter --model auto");
+    next.push("  /bedrouter status      /bedrouter probe      /bedrouter report");
+    next.push("  in a repo with a wiki: /openwiki doctor");
+  }
+  if (wantsClaude) {
+    next.push("  Claude Code: Phase 2 wires ~/.claude settings → bedrouter; until then use ANTHROPIC_BASE_URL manually if needed");
+    if (!which("claude")) next.push("  install Claude Code, then: hablo config  (Agent page) or re-run with --agent claude");
+  }
+  if (!flag("skip-firstmate")) {
+    if (activeAgent === "pi") next.push(`  firstmate: cd <your project> && hablo       -  or cd ${fmDir} && pi`);
+    else next.push(`  firstmate crew-harness=claude (captain launch via hablo Claude branch lands in Phase 4); checkout: ${fmDir}`);
+  }
+  next.push("  hablo config            - edit Jira / secrets / Dream / Agent (runtime files)");
+  next.push(`  agent preference: ${agentMarkerPath} = ${activeAgent} (installAgent=${installAgent})`);
+  log(`Next:\n${next.join("\n")}`);
+}
 if (!profile) log(`  (set AWS_PROFILE in ${envPath}, then: aws sso login --profile <name>)`);

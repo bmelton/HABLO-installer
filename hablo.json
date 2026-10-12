@@ -1,8 +1,22 @@
 {
   "$comment": "HABLO machine manifest: what `install.mjs` puts in place. Edit here, not in the script.",
   "defaults": {
-    "$comment": "What a bare `./install.sh` assumes. --profile on the command line wins; AWS_PROFILE in the environment wins over defaults.profile.",
-    "profile": "bedrouter"
+    "$comment": "What a bare `./install.sh` assumes. --agent / --profile / --ladder on the command line win; AWS_PROFILE in the environment wins over defaults.profile. Non-TTY installs use defaults.agent (pi) so scripts keep today's behavior; a TTY prompts with that default pre-selected.",
+    "agent": "pi",
+    "profile": "bedrouter",
+    "ladder": "oss"
+  },
+  "agents": {
+    "$comment": "Per-agent install carriers. Pi packages/settings still live under top-level `pi` until a later manifest move; Claude-specific settings/plugin land in Phases 2–3. Install resolves --agent once and writes ~/.hablo/agent for hablo-config.",
+    "claude": {
+      "cliPackage": "@anthropic-ai/claude-code",
+      "marketplace": "~/.hablo/claude",
+      "plugin": "hablo",
+      "settings": {
+        "$comment": "Phase 2 merges env (ANTHROPIC_BASE_URL / AUTH_TOKEN / MODEL) into ~/.claude/settings.json.",
+        "env": {}
+      }
+    }
   },
   "pi": {
     "$commentCli": "minCliVersion: the oldest Pi CLI the prerequisite check accepts. pi-bedrouter declares it as its peer dependency.",
