@@ -106,6 +106,10 @@ printf 'HABLO_CREW_MODEL=%s\\n' "$HABLO_CREW_MODEL" >> ${JSON.stringify(calls)}
 exec ${JSON.stringify(process.execPath)} "$@"
 `);
   }
+  // When proving "missing claude", drop the host PATH so a real ~/.local/bin/claude cannot leak in.
+  const pathForRun = stubClaude === false && agent === "claude"
+    ? `${f.fakeBin}:/usr/bin:/bin`
+    : `${f.fakeBin}:${process.env.PATH}`;
   const result = spawnSync(path.join(f.home, ".local", "bin", "hablo"), args, {
     cwd: project,
     encoding: "utf8",
@@ -113,7 +117,7 @@ exec ${JSON.stringify(process.execPath)} "$@"
       ...process.env,
       HOME: f.home,
       PI_CODING_AGENT_DIR: f.agentDir,
-      PATH: `${f.fakeBin}:${process.env.PATH}`,
+      PATH: pathForRun,
       HABLO_PREFLIGHT: "skip",
       HABLO_HERDR_STAMP: "0",
       ...env,
@@ -147,6 +151,7 @@ test("E2E: --agent both install wires Pi + Claude; voyage, flip, interrogate, pr
     assert.equal(settings.env.ANTHROPIC_BASE_URL, "http://127.0.0.1:20129");
     assert.equal(settings.env.ANTHROPIC_MODEL, "auto");
     assert.ok(settings.env.ANTHROPIC_AUTH_TOKEN);
+    assert.equal(settings.env.CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS, "1");
     assert.equal(settings.enabledPlugins["hablo@hablo"], true);
     assert.equal(settings.extraKnownMarketplaces.hablo.source.source, "directory");
 

@@ -16,11 +16,12 @@
       "hooksDir": "~/.hablo/claude/hooks",
       "autoModel": "auto",
       "settings": {
-        "$comment": "Install fills ANTHROPIC_* from bedrouter.port + generated BEDROUTER_API_KEY; merges into ~/.claude/settings.json only where keys are absent.",
+        "$comment": "Install fills ANTHROPIC_* from bedrouter.port + generated BEDROUTER_API_KEY; merges into ~/.claude/settings.json only where keys are absent. CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS keeps Claude Code from sending beta body/header fields Bedrock rejects.",
         "env": {
           "ANTHROPIC_BASE_URL": null,
           "ANTHROPIC_AUTH_TOKEN": null,
-          "ANTHROPIC_MODEL": null
+          "ANTHROPIC_MODEL": null,
+          "CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS": "1"
         }
       }
     }

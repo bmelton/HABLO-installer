@@ -79,6 +79,7 @@ With `--agent claude` or `both`:
    - `ANTHROPIC_BASE_URL=http://127.0.0.1:<bedrouter.port>`
    - `ANTHROPIC_AUTH_TOKEN=<that key>`
    - `ANTHROPIC_MODEL=auto`
+   - `CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS=1` (Bedrock rejects Claude Code’s experimental beta fields)
 3. Strips any Phase 2 HABLO `SessionStart` entry from settings (the plugin owns hooks now).
 
 **Step 7** — HABLO plugin (skipped with `--skip-agents`):

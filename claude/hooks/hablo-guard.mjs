@@ -15,8 +15,8 @@ const TOOL_MAP = {
 };
 
 function binPath() {
-  const env = process.env.HABLO_GUARD_BIN;
-  if (env && fs.existsSync(env)) return env;
+  // Explicit override always wins (including a missing path → fail closed).
+  if (process.env.HABLO_GUARD_BIN) return process.env.HABLO_GUARD_BIN;
   const local = path.join(os.homedir(), ".local", "bin", "hablo-guard");
   if (fs.existsSync(local)) return local;
   return "hablo-guard";

@@ -872,6 +872,9 @@ else {
     ANTHROPIC_BASE_URL: `http://127.0.0.1:${port}`,
     ANTHROPIC_AUTH_TOKEN: apiKey,
     ANTHROPIC_MODEL: autoModel,
+    // Claude Code ships beta fields (context_management, dated anthropic-beta flags) Bedrock rejects.
+    // Strip at the client; bedrouter also drops them as a backstop.
+    CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS: "1",
   };
 
   try { if (fs.lstatSync(claudeSettingsPath).isSymbolicLink()) note(`${homePath(claudeSettingsPath)} is a symlink (${fs.readlinkSync(claudeSettingsPath)}): writing through the link`); } catch { /* absent */ }
@@ -910,7 +913,7 @@ else {
     recordMany(claudeActions);
   } else note(`${homePath(claudeSettingsPath)} Claude routing up to date`);
 
-  note("undo: remove ANTHROPIC_BASE_URL / ANTHROPIC_AUTH_TOKEN / ANTHROPIC_MODEL from env in ~/.claude/settings.json");
+  note("undo: remove ANTHROPIC_BASE_URL / ANTHROPIC_AUTH_TOKEN / ANTHROPIC_MODEL / CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS from env in ~/.claude/settings.json");
   note("SessionStart / progress hooks: HABLO plugin (step 7); native CLAUDE_CODE_USE_BEDROCK=1 is a manual escape hatch");
 }
 

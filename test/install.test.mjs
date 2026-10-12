@@ -208,6 +208,7 @@ exit 0
     assert.equal(settings.env.ANTHROPIC_MODEL, "keep-me");
     assert.equal(settings.env.ANTHROPIC_BASE_URL, "http://127.0.0.1:20129");
     assert.equal(settings.env.ANTHROPIC_AUTH_TOKEN, key);
+    assert.equal(settings.env.CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS, "1");
     assert.equal(settings.hooks.SessionStart.length, 1);
     assert.match(JSON.stringify(settings.hooks.SessionStart), /echo operator/);
     assert.doesNotMatch(JSON.stringify(settings.hooks.SessionStart), /start-bedrouter/);
@@ -541,7 +542,8 @@ exit 99
       env: {
         ...process.env,
         HOME: f.home,
-        PATH: `${f.fakeBin}:${process.env.PATH}`,
+        // Isolate from a real host Claude install under ~/.local/bin.
+        PATH: `${f.fakeBin}:/usr/bin:/bin`,
         HABLO_PREFLIGHT: "skip",
         HABLO_HERDR_STAMP: "0",
       },

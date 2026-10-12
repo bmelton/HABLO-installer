@@ -49,6 +49,7 @@ Three environment variables, in the `env` block of `~/.claude/settings.json`:
 | `ANTHROPIC_BASE_URL` | `http://127.0.0.1:20129` | The port from `bedrouter.port` in the manifest |
 | `ANTHROPIC_AUTH_TOKEN` | the value of `BEDROUTER_API_KEY` | bedrouter reads `x-api-key` and `authorization`; the real credential is the AWS profile behind it |
 | `ANTHROPIC_MODEL` | the ladder's `autoSelect` alias | `auto` for the `claude` ladder |
+| `CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS` | `1` | Stops Claude Code from sending beta fields Bedrock rejects (`context_management`, dated `anthropic-beta` flags); bedrouter also strips them |
 
 **Decision: the variables go in `settings.json`, not in the `hablo` wrapper.**
 A firstmate crewmate is launched by `bin/fm-spawn.sh`, which runs `claude`
@@ -135,8 +136,9 @@ reversal for this feature, and it is what the uninstall receipt records.
 
 ## Open questions
 
-- Claude Code sends a `user-agent` and beta headers bedrouter has never seen.
-  Confirm it neither forwards them to Bedrock unchanged nor rejects them.
+- Claude Code `anthropic-beta` flags: bedrouter drops them before Bedrock
+  InvokeModel (`drop-anthropic-beta:…` in the decision log) so dated flags like
+  `prompt-caching-scope-*` / `redact-thinking-*` do not 400 the turn.
 - Decision headers (`x-bedrouter-model`, …) already name the routed rung; the
   plugin can surface them in a status line (closest equivalent of Pi's
   `/bedrouter status`).

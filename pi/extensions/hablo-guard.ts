@@ -16,8 +16,8 @@ type Verdict = {
 };
 
 function binPath(): string {
-  const env = process.env.HABLO_GUARD_BIN;
-  if (env && fs.existsSync(env)) return env;
+  // Explicit override always wins (including a missing path → fail closed).
+  if (process.env.HABLO_GUARD_BIN) return process.env.HABLO_GUARD_BIN;
   const home = process.env.HABLO_HOME || path.join(os.homedir(), ".hablo");
   const local = path.join(os.homedir(), ".local", "bin", "hablo-guard");
   if (fs.existsSync(local)) return local;
