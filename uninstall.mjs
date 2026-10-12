@@ -35,7 +35,7 @@ function inferActions(ctx) {
   const candidates=[
     path.join(expand(manifest.cli.binDir),"hablo"), path.join(expand(manifest.cli.home),"hablo-captain.ts"), path.join(expand(manifest.cli.home),"tone.md"),
     path.join(agentDir,"extensions","hablo-tone.ts"), path.join(agentDir,"extensions","hablo-guard.ts"), path.join(expand(manifest.cli.binDir),"hablo-guard"),
-    path.join(expand(manifest.cli.binDir),"hablo-jira"), path.join(expand(manifest.cli.binDir),"hablo-jira-agent"), path.join(expand(manifest.cli.binDir),"hablo-dream"),
+    path.join(expand(manifest.cli.binDir),"hablo-jira"), path.join(expand(manifest.cli.binDir),"hablo-jira-agent"), path.join(expand(manifest.cli.binDir),"hablo-dream"), path.join(expand(manifest.cli.binDir),"hablo-config"),
     path.join(expand(manifest.jira?.home??"~/.hablo/jira"),"config.json"), path.join(expand(manifest.dream?.home??"~/.hablo/dream"),"config.json")
   ];
   for(const p of candidates){if(!exists(p)||fs.lstatSync(p).isDirectory())continue;let b;try{b=fs.readFileSync(p)}catch{continue}if(b.includes(Buffer.from("HABLO-installer")))out.push({kind:"file.create",path:ctx.homePath(p),sha256:sha256(b),inferred:true});}
@@ -108,7 +108,22 @@ export function runUninstall({manifest, here, args, home=os.homedir(), agentDir=
   if(opts.withFirstmate&&!inferred&&actions.some((a)=>a.kind==="git.clone"&&expand(a.path)===fmDir)){const unsafe=firstmateSafety(fmDir);if(unsafe.length)leftovers.push(...unsafe);else add("clone",`remove firstmate clone ${fmDir}`,()=>fs.rmSync(validateDeleteTarget(fmDir,home,allowedRemovalRoots),{recursive:true}));}
   else if(opts.withFirstmate&&inferred)leftovers.push(`${fmDir}: clone skipped because inferred provenance cannot prove HABLO created it`);
 
-  if(opts.removePi&&!inferred){const packages=new Map();for(const a of actions)if(a.kind==="pi.package"&&!packages.has(a.name))packages.set(a.name,a);for(const [name,a] of packages){if(a.wasListed)leftovers.push(`${name}: listed before HABLO; kept`);else add("piPackages",`remove Pi package ${name}`,()=>{const r=run("pi",["remove",name],{inherit:true,timeout:600_000});if(r.status!==0)leftovers.push(`${name}: pi remove failed`)});}for(const a of actions)if(a.kind==="pi.cli"&&a.wasPresent===false){const cmd=a.manager==="bun"?["bun",["remove","-g",a.name]]:a.manager==="pnpm"?["pnpm",["remove","-g",a.name]]:["npm",["uninstall","-g",a.name]];add("pi",`uninstall Pi CLI ${a.name} with ${a.manager}`,()=>{const r=run(cmd[0],cmd[1],{inherit:true,timeout:600_000});if(r.status!==0)leftovers.push(`${a.name}: CLI uninstall failed`)})}}
+  if(opts.removePi&&!inferred){const packages=new Map();for(const a of actions)if(a.kind==="pi.package"&&!packages.has(a.name))packages.set(a.name,a);for(const [name,a] of packages){if(a.wasListed)leftovers.push(`${name}: listed before HABLO; kept`);else add("piPackages",`remove Pi package ${name}`,()=>{const r=run("pi",["remove",name],{inherit:true,timeout:600_000});if(r.status!==0)leftovers.push(`${name}: pi remove failed`)});}for(const a of actions)if(a.kind==="pi.cli"&&a.wasPresent===false){
+    if(a.manager==="pi.dev"){
+      add("pi",`uninstall managed Pi CLI under ${homePath(agentDir)}/install`,()=>{
+        const managedRoot=path.join(agentDir,"install"), launcher=path.join(agentDir,"bin","pi");
+        let entrypoint; try{entrypoint=readJson(path.join(managedRoot,"managed-install.json"))?.entrypoint?.path}catch{}
+        for(const p of [entrypoint,path.join(home,".local","bin","pi"),launcher].filter(Boolean)){
+          if(!exists(p))continue;
+          try{if(p===launcher||fs.lstatSync(p).isSymbolicLink())fs.unlinkSync(validateDeleteTarget(p,home,[agentDir,path.join(home,".local","bin")]))}catch(e){leftovers.push(`${p}: ${e.message}`)}
+        }
+        if(exists(managedRoot))fs.rmSync(validateDeleteTarget(managedRoot,home,[agentDir]),{recursive:true,force:true});
+      });
+    }else{
+      const cmd=a.manager==="bun"?["bun",["remove","-g",a.name]]:a.manager==="pnpm"?["pnpm",["remove","-g",a.name]]:["npm",["uninstall","-g",a.name]];
+      add("pi",`uninstall Pi CLI ${a.name} with ${a.manager}`,()=>{const r=run(cmd[0],cmd[1],{inherit:true,timeout:600_000});if(r.status!==0)leftovers.push(`${a.name}: CLI uninstall failed`)});
+    }
+  }}
   else if(opts.removePi&&inferred)leftovers.push("Pi packages and CLI: skipped because inferred provenance cannot establish prior ownership");
   const noMistakesPid=path.join(home,".no-mistakes","daemon.pid");if(opts.withGlobals&&exists(noMistakesPid))leftovers.push(`${noMistakesPid}: third-party daemon left running; use no-mistakes' own stop command`);
 
