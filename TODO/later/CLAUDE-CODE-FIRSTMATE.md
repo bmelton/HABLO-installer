@@ -11,9 +11,12 @@
 - [ ] Preflight `bin/fm-claude-trust.sh` presence and report it, because it can refuse a spawn
 - [ ] `bin/hablo`: add the Claude Code launch branch
 - [ ] Write `~/.hablo/hablo-captain-prompt.sh`, the shell equivalent of `hablo-captain.ts`
+- [ ] Captain prompt: when `interrogate.enabled`, include the same senior-lead / TDD nudge Pi gets from `captain-interrogate-policy.md` (point at installed TDD skill)
+- [ ] Captain + brief path: Progress duty text already in ticket policy / `brief-include.md`; confirm Claude crews receive it unchanged
+- [ ] Progress automation: Claude hooks (plugin or per-worktree settings) call `hablo-jira progress` after commit and `hablo-jira pr-opened` after PR create — same CLI as Pi; soft-fail
 - [ ] `install.mjs` step 11: run `*-axi setup hooks` when Claude Code is selected
 - [ ] Add `.hablo/hablo-captain-prompt.sh` to `backup.config` in `hablo.json`
-- [ ] Run a real voyage: captain, one crewmate, one scout, and check the turn-end signal
+- [ ] Run a real voyage: captain, one crewmate, one scout; turn-end signal; interrogate-when-on; commit/PR → Jira
 - [ ] `README.md`: the firstmate section gains a harness column
 
 ## What firstmate already does
@@ -86,6 +89,30 @@ somebody is watching.
 
 The consequence is stated plainly: the same action can succeed for a captain and
 stop for a crewmate. That matches the guard's design and it is intentional.
+
+## Interrogate and Progress (inherit Pi product rules)
+
+These shipped on Pi first. Claude does not get a second flag set.
+
+**Interrogate.** `interrogate.enabled` and the pinned TDD skill are already in
+`hablo.json` / install. On Pi, `captain-interrogate-policy.md` lands in
+`data/captain.md` and the skill lives under the Pi skills tree. For Claude:
+
+- The captain prompt (`hablo-captain-prompt.sh`) must carry the same nudge:
+  context from code/wiki → senior-lead interview → TDD under `~/tdds/…` →
+  accept or explicit **skip interrogate** before spawning implementers.
+- The skill must be reachable from Claude Code (plugin skill — see
+  [PLUGIN](CLAUDE-CODE-PLUGIN.md)). Do not require a second pin or a Claude-only
+  `hablo.json` key.
+
+**Progress.** `hablo-jira progress` / `pr-opened`, ticket policy, and brief-include
+already define commit + PR cadence (never Done). Pi enforces via post-tool
+hooks. For Claude:
+
+- Standing prose in `data/captain.md` / briefs applies to any harness.
+- Automation must not rely on the model remembering: add Claude hooks that
+  invoke the same CLI after successful commit / PR create (soft-fail, SHA/PR
+  dedupe unchanged). Dispatch reap backfill remains the safety net.
 
 ## The `hablo` wrapper
 

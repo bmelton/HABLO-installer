@@ -9,10 +9,12 @@
 - [ ] Split the six agent profiles into a shared body plus a per-harness front matter
 - [ ] Render `claude/agents/*.md` from the shared bodies
 - [ ] Write `claude/skills/openwiki/SKILL.md`
+- [ ] When interrogate is enabled: expose the pinned TDD / technical-design-doc skill to Claude (plugin `skills/` copy or install-time link to the same overlay Pi uses — one pin, two carriers)
 - [ ] Translate `pi/workflows/ticket.md` to a workflow script
 - [ ] Translate `pi/workflows/review-round.md` to a workflow script
 - [ ] Write `claude/commands/ticket.md` and `claude/commands/review-round.md`
 - [ ] Confirm whether a plugin loads `workflows/`; if not, install the scripts to `~/.claude/workflows/`
+- [ ] Progress hooks in `hooks/hooks.json`: after successful Bash/`git commit` and `gh pr create`, run `hablo-jira progress` / `pr-opened` (soft-fail; same markers as Pi)
 - [ ] `install.mjs` step 7: copy the plugin to `~/.hablo/claude`, register the marketplace, enable the plugin
 - [ ] `install.mjs` step 8: write the model notes into each agent's `model` field
 - [ ] Add `.hablo/claude` to `backup.config` in `hablo.json`
@@ -64,8 +66,9 @@ claude/
   commands/              ticket.md, review-round.md
   skills/
     openwiki/SKILL.md    the wiki-first read order
+    technical-design-doc/  when interrogate enabled (same pin/overlay as Pi)
   hooks/
-    hooks.json           the bedrouter start hook and the guard
+    hooks.json           bedrouter SessionStart; progress (commit/PR→Jira); guard (optional)
   workflows/             ticket.js, review-round.js   (see the delivery note)
 ```
 
@@ -140,6 +143,29 @@ its argument and invokes the workflow. A workflow run is opt-in per invocation
 by design, and a slash command is the opt-in. This also gives a graceful
 degradation: if the workflow is unavailable, the command still describes the
 pipeline and the agent runs it inline, less deterministically.
+
+## Interrogate (TDD skill)
+
+Pi installs the pinned `technical-design-doc` skill (see workspace
+`INTERROGATE-PLAN.md`) and injects captain policy when `interrogate.enabled`.
+Claude Code needs the **same skill content** under the plugin (or an install
+step that places it where Claude loads skills), not a second upstream pin.
+
+**Decision: one pin in `hablo.json`, two install carriers.** Step that fetches
+the skill for Pi also materializes the Claude plugin copy (or a stable path the
+plugin skill points at). Overlay rules (no docx/SharePoint; interview via chat)
+apply to both. When interrogate is false, omit or disable the Claude skill the
+same way Pi skips the captain nudge.
+
+## Progress hooks
+
+The shared CLI is already the source of truth. Plugin `hooks/hooks.json` should
+register matchers that, after a successful commit or `gh pr create`, invoke
+`hablo-jira progress` / `hablo-jira pr-opened` with the same key resolution and
+dedupe markers Pi uses. Soft-fail on network/auth. Do not block the tool.
+
+Guard hooks (optional MVP) can share this `hooks/` directory later; progress is
+in scope for first Claude ship even if guard is not.
 
 ## OpenWiki
 

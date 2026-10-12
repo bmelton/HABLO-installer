@@ -3,6 +3,10 @@
 > Status: design settled, not implemented. Part of
 > [CLAUDE-CODE.md](CLAUDE-CODE.md). Land this before any other Claude Code work,
 > because every other document writes into a step this one makes conditional.
+> **Note:** `hablo-config` already has an Agent page (Pi ↔ Claude, warn if
+> missing). This document still owns install-time `--agent`, the prompt, the
+> marker, and making install steps conditional. Runtime TUI flip must edit the
+> same on-disk default this feature introduces.
 
 - [ ] Add `defaults.agent` to `hablo.json`
 - [ ] Move the Pi-only manifest keys under an `agents.pi` block, add `agents.claude`

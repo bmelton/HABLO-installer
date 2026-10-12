@@ -1,13 +1,16 @@
 # Claude Code reaches Bedrock through bedrouter
 
-> Status: design settled, two upstream gaps open. Part of
-> [CLAUDE-CODE.md](CLAUDE-CODE.md). The gaps are in the `bedrouter` repository,
-> not this one, and they block a usable session.
+> Status: design settled. Part of [CLAUDE-CODE.md](CLAUDE-CODE.md).
+> Bedrouter Phase **0a** shipped (`auto` on `/v1/messages` among Anthropic
+> rungs; decision headers). **0c** (count_tokens / cache_control) is still open
+> and is **not** an MVP gate. Live Claude Code + SSO streaming `tool_use` smoke
+> remains the main routing verification.
 
-- [ ] `bedrouter`: add `POST /v1/messages/count_tokens`
-- [ ] `bedrouter`: pass `cache_control` blocks through to Bedrock, or strip them and say so
-- [ ] `bedrouter`: confirm streaming `tool_use` blocks survive the `/v1/messages` path
-- [ ] `bedrouter`: return the routed rung in a response header, for the status line
+- [x] `bedrouter`: `auto` on `/v1/messages` within Anthropic rungs (Phase 0a)
+- [x] `bedrouter`: return the routed rung in response headers (`x-bedrouter-*`)
+- [ ] `bedrouter`: confirm streaming `tool_use` blocks survive the `/v1/messages` path (Claude Code + SSO smoke)
+- [ ] `bedrouter`: add `POST /v1/messages/count_tokens` (0c, nice-to-have)
+- [ ] `bedrouter`: pass `cache_control` blocks through to Bedrock, or strip them and say so (0c)
 - [ ] `hablo.json`: add `agents.claude.settings.env` with the three variables
 - [ ] `install.mjs` step 3: merge the `env` block into `~/.claude/settings.json`, never overwrite
 - [ ] `install.mjs` step 4: write `BEDROUTER_API_KEY` into `~/.bedrouter/.env`
@@ -100,9 +103,10 @@ dropping them is the current behavior and it means full input price on every
 turn of every session. Measure that on a real session before deciding the work
 is optional, because on a long captain session it is the dominant cost.
 
-Both gaps are listed at the top of this document because the routing decision
-stands on them. Neither is a reason to choose native Bedrock mode: native mode
-has no routing at all, which costs more than a missing cache.
+These are Phase **0c** gaps. They do **not** block MVP: 0a already makes
+`auto` usable on Messages. Prefer measuring cache cost on a real session before
+scheduling 0c. Neither gap is a reason to choose native Bedrock mode: native
+mode has no routing at all, which costs more than a missing cache.
 
 ## The ladder constraint
 
@@ -133,9 +137,9 @@ reversal for this feature, and it is what the uninstall receipt records.
 
 - Claude Code sends a `user-agent` and beta headers bedrouter has never seen.
   Confirm it neither forwards them to Bedrock unchanged nor rejects them.
-- The routed rung is invisible to the operator. A response header naming it
-  would let the plugin put the rung in the status line, which is the closest
-  equivalent of Pi's `/bedrouter status`.
-- What happens when bedrouter drops the last rung of a class during the probe
-  and Claude Code asks for `auto` anyway? Today the answer is a 400 at request
-  time. The probe should refuse to finish in that state.
+- Decision headers (`x-bedrouter-model`, …) already name the routed rung; the
+  plugin can surface them in a status line (closest equivalent of Pi's
+  `/bedrouter status`).
+- What happens when bedrouter drops the last Anthropic rung of a class during
+  the probe and Claude Code asks for `auto` anyway? Messages returns 400 with
+  a clear error. The probe should refuse to finish in that state.
