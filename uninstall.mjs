@@ -34,8 +34,8 @@ function inferActions(ctx) {
   const expand=(p)=>p.replace(/^~(?=$|\/)/,home);
   const candidates=[
     path.join(expand(manifest.cli.binDir),"hablo"), path.join(expand(manifest.cli.home),"hablo-captain.ts"), path.join(expand(manifest.cli.home),"tone.md"),
-    path.join(agentDir,"extensions","hablo-tone.ts"), path.join(agentDir,"extensions","hablo-guard.ts"), path.join(expand(manifest.cli.binDir),"hablo-guard"),
-    path.join(expand(manifest.cli.binDir),"hablo-jira"), path.join(expand(manifest.cli.binDir),"hablo-jira-agent"), path.join(expand(manifest.cli.binDir),"hablo-dream"), path.join(expand(manifest.cli.binDir),"hablo-config"),
+    path.join(agentDir,"extensions","hablo-tone.ts"), path.join(agentDir,"extensions","hablo-crewmate.ts"), path.join(agentDir,"extensions","hablo-progress.ts"), path.join(agentDir,"extensions","hablo-guard.ts"), path.join(expand(manifest.cli.binDir),"hablo-guard"),
+    path.join(expand(manifest.cli.binDir),"hablo-jira"), path.join(expand(manifest.cli.binDir),"hablo-jira-agent"), path.join(expand(manifest.cli.binDir),"hablo-dream"), path.join(expand(manifest.cli.binDir),"hablo-config"), path.join(expand(manifest.cli.binDir),"bedrouter"),
     path.join(expand(manifest.jira?.home??"~/.hablo/jira"),"config.json"), path.join(expand(manifest.dream?.home??"~/.hablo/dream"),"config.json")
   ];
   for(const p of candidates){if(!exists(p)||fs.lstatSync(p).isDirectory())continue;let b;try{b=fs.readFileSync(p)}catch{continue}if(b.includes(Buffer.from("HABLO-installer")))out.push({kind:"file.create",path:ctx.homePath(p),sha256:sha256(b),inferred:true});}

@@ -257,10 +257,12 @@
       ".pi/agent/agents",
       ".pi/agent/extensions/hablo-tone.ts",
       ".pi/agent/extensions/hablo-crewmate.ts",
+      ".pi/agent/extensions/hablo-progress.ts",
       ".pi/workflows",
       ".local/bin/hablo",
       ".local/bin/hablo-preflight",
       ".local/bin/hablo-fleet-reset",
+      ".local/bin/bedrouter",
       ".hablo/hablo-captain.ts",
       ".hablo/hablo-preflight",
       ".hablo/tone.md"

@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 
@@ -18,10 +19,13 @@ import (
 
 const version = "0.1.0"
 
+var issueKeyInText = regexp.MustCompile(`\b([A-Z][A-Z0-9_]*-[1-9][0-9]*)\b`)
+var commitSHA = regexp.MustCompile(`(?i)^[0-9a-f]{7,40}$`)
+
 func main() { os.Exit(run(os.Args[1:], os.Stdout, os.Stderr)) }
 func run(args []string, out, errout io.Writer) int {
 	if len(args) == 0 {
-		fmt.Fprintln(errout, "usage: hablo-jira <comment|transition|read|search|create|doctor|version>")
+		fmt.Fprintln(errout, "usage: hablo-jira <comment|progress|pr-opened|transition|read|search|create|doctor|version>")
 		return 4
 	}
 	if args[0] == "version" {
@@ -46,6 +50,9 @@ func run(args []string, out, errout io.Writer) int {
 	sprint := fs.String("sprint", defaultSprint, "")
 	ready := fs.Bool("ready", false, "")
 	template := fs.Bool("template", false, "")
+	commit := fs.String("commit", "", "")
+	message := fs.String("message", "", "")
+	pr := fs.String("pr", "", "")
 	if e := fs.Parse(args[1:]); e != nil {
 		return 4
 	}
@@ -60,7 +67,11 @@ func run(args []string, out, errout io.Writer) int {
 		}
 		return 3
 	}
-	if p, ok := c.ProjectFor(*key); *key != "" && !ok {
+	resolvedKey := strings.TrimSpace(*key)
+	if resolvedKey == "" && (args[0] == "progress" || args[0] == "pr-opened") {
+		resolvedKey = resolveIssueKey()
+	}
+	if p, ok := c.ProjectFor(resolvedKey); resolvedKey != "" && !ok {
 		_ = p
 		if !*quiet {
 			fmt.Fprintln(errout, "jira project is not mapped")
@@ -75,7 +86,7 @@ func run(args []string, out, errout io.Writer) int {
 		if !c.Reporting.Enabled {
 			return 3
 		}
-		if *key == "" || *stage == "" || *body == "" {
+		if resolvedKey == "" || *stage == "" || *body == "" {
 			return fail(fmt.Errorf("comment requires --key, --stage, and --body"))
 		}
 		if len(c.Reporting.Stages) > 0 && !contains(c.Reporting.Stages, *stage) {
@@ -95,53 +106,108 @@ func run(args []string, out, errout io.Writer) int {
 		runID = filepath.Base(runID)
 		branch := gitBranch()
 		marker := fmt.Sprintf("hablo: stage=%s run=%s", *stage, runID)
-		recent, e := client.RecentComments(ctx, *key, 50)
+		present, e := hasMarker(ctx, client, resolvedKey, marker)
 		if e != nil {
 			return fail(e)
 		}
-		for _, x := range recent {
-			if strings.Contains(adf.Markdown(x.Body), marker) {
+		if present {
+			if !*quiet {
+				fmt.Fprintln(out, "comment already present")
+			}
+			return 0
+		}
+		text := fmt.Sprintf("## HABLO: %s\n\n%s\n\nAgent: %s  \nBranch: %s\n\n%s", *stage, strings.TrimSpace(raw), fallback(os.Getenv("FM_TASK_ID"), "captain"), fallback(branch, "unknown"), marker)
+		if e = client.AddComment(ctx, resolvedKey, text); e != nil {
+			return fail(e)
+		}
+	case "progress":
+		if !c.Reporting.Enabled {
+			return 3
+		}
+		if resolvedKey == "" {
+			if !*quiet {
+				fmt.Fprintln(out, "no jira key")
+			}
+			return 0
+		}
+		sha := strings.ToLower(strings.TrimSpace(*commit))
+		if !commitSHA.MatchString(sha) {
+			return fail(fmt.Errorf("progress requires --commit <sha>"))
+		}
+		marker := progressMarker(sha)
+		present, e := hasMarker(ctx, client, resolvedKey, marker)
+		if e != nil {
+			return fail(e)
+		}
+		if present {
+			if !*quiet {
+				fmt.Fprintln(out, "progress already present")
+			}
+			return 0
+		}
+		subject := strings.TrimSpace(*message)
+		if subject == "" {
+			subject = gitSubject(sha)
+		}
+		if subject == "" {
+			subject = "commit"
+		}
+		branch := gitBranch()
+		text := fmt.Sprintf("## HABLO: progress\n\n%s\n\nCommit: `%s`  \nBranch: %s\n\n%s", subject, sha, fallback(branch, "unknown"), marker)
+		if e = client.AddComment(ctx, resolvedKey, text); e != nil {
+			return fail(e)
+		}
+	case "pr-opened":
+		if !c.Reporting.Enabled && !c.Reporting.Transitions {
+			return 3
+		}
+		if resolvedKey == "" {
+			if !*quiet {
+				fmt.Fprintln(out, "no jira key")
+			}
+			return 0
+		}
+		url := strings.TrimRight(strings.TrimSpace(*pr), "/")
+		if url == "" || !strings.Contains(url, "://") {
+			return fail(fmt.Errorf("pr-opened requires --pr <url>"))
+		}
+		marker := prOpenedMarker(url)
+		if c.Reporting.Enabled {
+			present, e := hasMarker(ctx, client, resolvedKey, marker)
+			if e != nil {
+				return fail(e)
+			}
+			if present {
 				if !*quiet {
-					fmt.Fprintln(out, "comment already present")
+					fmt.Fprintln(out, "pr comment already present")
 				}
 				return 0
 			}
+			text := fmt.Sprintf("## HABLO: pr-opened\n\nPull request: %s\n\n%s", url, marker)
+			if e = client.AddComment(ctx, resolvedKey, text); e != nil {
+				return fail(e)
+			}
 		}
-		text := fmt.Sprintf("## HABLO: %s\n\n%s\n\nAgent: %s  \nBranch: %s\n\n%s", *stage, strings.TrimSpace(raw), fallback(os.Getenv("FM_TASK_ID"), "captain"), fallback(branch, "unknown"), marker)
-		if e = client.AddComment(ctx, *key, text); e != nil {
-			return fail(e)
+		if c.Reporting.Transitions {
+			if e := transitionTo(ctx, client, c, resolvedKey, "in-review"); e != nil {
+				return fail(e)
+			}
 		}
 	case "transition":
 		if !c.Reporting.Transitions {
 			return 3
 		}
-		p, _ := c.ProjectFor(*key)
-		name := p.Statuses[camel(*to)]
-		if name == "" {
-			return fail(fmt.Errorf("no mapped transition %q", *to))
+		if resolvedKey == "" {
+			return fail(fmt.Errorf("transition requires --key"))
 		}
-		ts, e := client.Transitions(ctx, *key)
-		if e != nil {
-			return fail(e)
-		}
-		found := ""
-		for _, t := range ts {
-			if strings.EqualFold(t.To.Name, name) || strings.EqualFold(t.Name, name) {
-				if strings.EqualFold(t.To.StatusCategory.Key, "done") {
-					return fail(fmt.Errorf("refusing transition into Done category"))
-				}
-				found = t.ID
-				break
-			}
-		}
-		if found == "" {
-			return fail(fmt.Errorf("transition %q is not available", name))
-		}
-		if e = client.Transition(ctx, *key, found); e != nil {
+		if e := transitionTo(ctx, client, c, resolvedKey, *to); e != nil {
 			return fail(e)
 		}
 	case "read":
-		x, e := client.Read(ctx, *key)
+		if resolvedKey == "" {
+			return fail(fmt.Errorf("read requires --key"))
+		}
+		x, e := client.Read(ctx, resolvedKey)
 		if e != nil {
 			return fail(e)
 		}
@@ -209,8 +275,8 @@ func run(args []string, out, errout io.Writer) int {
 		for k, p := range c.Projects {
 			fmt.Fprintf(out, "  %s -> %s (%s)\n", k, p.Dir, p.BaseBranch)
 		}
-		if *key != "" {
-			ts, e := client.Transitions(ctx, *key)
+		if resolvedKey != "" {
+			ts, e := client.Transitions(ctx, resolvedKey)
 			if e != nil {
 				return fail(e)
 			}
@@ -243,6 +309,74 @@ func gitBranch() string {
 		return ""
 	}
 	return strings.TrimSpace(string(b))
+}
+func gitSubject(sha string) string {
+	b, e := exec.Command("git", "log", "-1", "--format=%s", sha).Output()
+	if e != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(b))
+}
+func resolveIssueKey() string {
+	if k := strings.TrimSpace(os.Getenv("HABLO_JIRA_KEY")); config.ValidIssueKey(k) {
+		return k
+	}
+	return keyFromBranch(gitBranch())
+}
+func keyFromBranch(branch string) string {
+	branch = strings.TrimSpace(branch)
+	if config.ValidIssueKey(branch) {
+		return branch
+	}
+	for _, m := range issueKeyInText.FindAllString(branch, -1) {
+		if config.ValidIssueKey(m) {
+			return m
+		}
+	}
+	return ""
+}
+func progressMarker(sha string) string {
+	return "hablo: progress commit=" + strings.ToLower(sha)
+}
+func prOpenedMarker(url string) string {
+	return "hablo: pr-opened url=" + strings.TrimRight(strings.TrimSpace(url), "/")
+}
+func hasMarker(ctx context.Context, client *japi.Client, key, marker string) (bool, error) {
+	recent, e := client.RecentComments(ctx, key, 50)
+	if e != nil {
+		return false, e
+	}
+	for _, x := range recent {
+		if strings.Contains(adf.Markdown(x.Body), marker) {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+func transitionTo(ctx context.Context, client *japi.Client, c config.Config, key, to string) error {
+	p, _ := c.ProjectFor(key)
+	name := p.Statuses[camel(to)]
+	if name == "" {
+		return fmt.Errorf("no mapped transition %q", to)
+	}
+	ts, e := client.Transitions(ctx, key)
+	if e != nil {
+		return e
+	}
+	found := ""
+	for _, t := range ts {
+		if strings.EqualFold(t.To.Name, name) || strings.EqualFold(t.Name, name) {
+			if strings.EqualFold(t.To.StatusCategory.Key, "done") {
+				return fmt.Errorf("refusing transition into Done category")
+			}
+			found = t.ID
+			break
+		}
+	}
+	if found == "" {
+		return fmt.Errorf("transition %q is not available", name)
+	}
+	return client.Transition(ctx, key, found)
 }
 func fallback(a, b string) string {
 	if a != "" {
