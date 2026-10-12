@@ -36,8 +36,9 @@ come first on `PATH` shows up there.
 
 - [ ] Node.js 20 or later. The installer itself needs it.
 - [ ] Node.js 22 or later, *optional*, for OpenWiki.
-- [ ] npm, bun, or pnpm. `--install-pi` and the step 11 `*-axi` tools use it.
-- [ ] The Pi CLI (`@earendil-works/pi-coding-agent`) 0.85.0 or later, or run the installer with `--install-pi`.
+- [ ] npm. `--install-pi` (pi.dev managed installer) and the step 11 `*-axi` tools use it.
+- [ ] The Pi CLI 0.85.0 or later, or run the installer with `--install-pi` (runs `https://pi.dev/install.sh`).
+- [ ] curl. `--install-pi` and step 11 (`treehouse`, `no-mistakes`) use it.
 - [ ] AWS CLI version 2. Version 1 has no `aws configure sso`, no `sso-session` profiles, and no
       `aws bedrock get-use-case-for-model-access`.
 - [ ] git.
@@ -46,7 +47,6 @@ come first on `PATH` shows up there.
 - [ ] jq. firstmate uses it to validate `config/crew-dispatch.json`.
 - [ ] Go 1.22 or later. Steps 13 and 14 build the Jira and Dream binaries from source. Without Go, both steps are
       skipped.
-- [ ] curl. Step 11 uses it to install `treehouse` and `no-mistakes`.
 - [ ] go-task, *optional*, to run the `Taskfile.yml` tasks.
 - [ ] The Infisical CLI, *optional*, for `task secrets`.
 

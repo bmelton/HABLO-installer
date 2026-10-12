@@ -14,7 +14,7 @@ Idempotent: run it again any time; it only changes what differs and never overwr
 | Step | Action | Where |
 | --- | --- | --- |
 | 0 | With `--restore <tgz>`: puts personal state back from a `backup` archive; never overwrites a file that exists (`--force-restore` to override) | `~/.pi`, `~/.bedrouter` |
-| 1 | Checks node, pi, aws, git; with `--install-pi`, installs `@earendil-works/pi-coding-agent` globally when `pi` is missing (skipped when present); notes whether `openwiki` is installed (optional, Node 22+) | global npm/bun/pnpm prefix |
+| 1 | Checks node, pi, aws, git; with `--install-pi`, runs `https://pi.dev/install.sh` when `pi` is missing (skipped when present) for a managed install under `~/.pi/agent/install`; notes whether `openwiki` is installed (optional, Node 22+) | `~/.pi/agent/install`, usually `~/.local/bin/pi` |
 | 2 | `pi install` for every package in `hablo.json`, **and every `npm:`/`git:` package already listed in your `settings.json`**, that is not present on disk — so packages you added yourself come back after a reinstall too. An installed package that is not at its `hablo.json` pin is moved to it; `--update-packages` updates the unpinned ones | `~/.pi/agent/settings.json` → `packages`, code under `~/.pi/agent/npm/` |
 | 3 | Adds the `bedrouter/*` models to `enabledModels` **if an allowlist already exists** (creating one would hide every other provider), a few UX settings only where unset; `--default-model` also makes `bedrouter/auto` the default | `~/.pi/agent/settings.json` |
 | 4 | Writes pi-bedrouter settings (server home and stop-on-exit policy), a `.env` with `AWS_PROFILE`, and renders the ordered model stack in `bedrouter.json` from `hablo.json` | `~/.pi/agent/pi-bedrouter.json`, `~/.bedrouter/` |
@@ -28,6 +28,7 @@ Idempotent: run it again any time; it only changes what differs and never overwr
 | 11 | Installs the tools firstmate's bootstrap otherwise reports as `MISSING`: `gh-axi`, `chrome-devtools-axi`, `lavish-axi`, `tasks-axi`, `quota-axi` (`npm install -g`), and `treehouse`, `no-mistakes` (their own install scripts, into `~/.local/bin`, no sudo). Only what is absent; `--update-tools` reinstalls everything | npm's global prefix, `~/.local/bin`, `~/.no-mistakes/` |
 | 13 | Builds the Jira reporting CLI and labelled-ticket dispatch agent, renders their shared configuration, and installs a launchd agent or systemd user timer | `~/.local/bin/hablo-jira*`, `~/.hablo/jira/`, user service configuration |
 | 14 | Builds Dream, which distills recent corrections into reviewed rule proposals, renders its configuration, and installs a daily launchd or systemd timer | `~/.local/bin/hablo-dream`, `~/.hablo/dream/`, user service configuration |
+| 15 | Builds `hablo-config`, a Bubble Tea TUI for editing runtime files (Jira, secrets, Spy, Dream, firstmate, CLI stamps, Agent) | `~/.local/bin/hablo-config`; `hablo config` |
 
 Then: `pi --provider bedrouter --model auto`. For firstmate: `cd <your project> && hablo` (or `cd ~/firstmate && pi`) — firstmate's `AGENTS.md` takes over the session, and it spawns crewmates as `pi --model bedrouter/auto` processes in tmux, routed explicitly by the dispatch file the installer writes. pi-bedrouter starts the server on first use, shows what served each request in the footer, and `/bedrouter status|probe|report`, `/openwiki doctor` work from inside Pi.
 
@@ -36,7 +37,7 @@ Then: `pi --provider bedrouter --model auto`. For firstmate: `cd <your project> 
 | Flag | Meaning |
 | --- | --- |
 | `--profile <name>` | AWS profile for bedrouter (`AWS_PROFILE` in `~/.bedrouter/.env`). Default `bedrouter` (`defaults.profile` in the manifest; `AWS_PROFILE` in the environment wins over that). Any SSO profile works; the name is whatever `aws configure sso` produced |
-| `--install-pi` | Install the Pi CLI globally if `pi` is not on PATH; a no-op when it is. `--pi-manager npm\|bun\|pnpm` picks the tool (default: npm if present, else bun, else pnpm). If the manager's global bin dir is not on PATH, the installer still finds `pi` there for the rest of the run and prints the `export PATH=…` line to add to your shell rc |
+| `--install-pi` | Install the Pi CLI via `https://pi.dev/install.sh` if `pi` is not on PATH; a no-op when it is. Uses Pi's managed layout under `~/.pi/agent/install` (pinned deps, `pi update`) so the CLI is not tied to the active nvm Node. If the symlink dir is not on PATH, the installer still finds `pi` for the rest of the run and prints the `export PATH=…` line to add to your shell rc |
 | `--restore <tgz>` | Step 0: restore a `backup` archive (see below) |
 | `--force-restore` | Let the restore overwrite files that already exist |
 | `--default-model` | Make `bedrouter/auto` Pi's default model, not just the auto-selected one |
@@ -126,7 +127,7 @@ hablo update            # move to the newest release and install it
 those processes loaded. It also refuses a checkout with uncommitted changes, or with commits that no remote branch
 contains. It stops the Jira agent, checks out the newest tag, and runs that release's installer with the arguments
 of your last install. It does not pull firstmate, update the Pi CLI, or update the firstmate tools. A full
-`./install.sh` run, `pi update --self`, and `--update-tools` still do those. If the new release fails to install,
+`./install.sh` run, `pi update`, and `--update-tools` still do those. If the new release fails to install,
 `hablo update` checks out the previous commit and installs it again.
 
 To publish a release, commit the pin changes in `hablo.json`, push the commit, and run `task release -- X.Y.Z`. The
@@ -143,10 +144,11 @@ What is *not* in `~/.pi` and therefore unaffected by any of this: `~/.aws` (SSO 
 Uninstall is plan-only unless `--yes` is present. The default reverses installer-created files, JSON keys, model-list entries, and marked firstmate policy blocks; it unloads the Jira and Dream services before removing their binaries. It never unlinks a dotfiles-managed settings symlink, removes a file whose installed hash has changed, or touches AWS, project repositories, Pi authentication, or trust state.
 
 ```sh
+./uninstall.sh                                     # full removal: --all --yes (backs up first)
 node install.mjs uninstall                         # inspect the default plan
-node install.mjs uninstall --yes                   # execute it; backs up first
+node install.mjs uninstall --yes                   # execute default scope only
 node install.mjs uninstall --all                   # inspect full removal
-node install.mjs uninstall --all --yes             # state, globals, firstmate and Pi too
+node install.mjs uninstall --all --yes             # same as ./uninstall.sh
 ```
 
 The additional scopes are `--with-state`, `--with-globals`, `--with-firstmate`, `--with-services`, and `--remove-pi`; `--all` enables them together. Every execution backs up first unless `--no-backup` is explicit. `--with-firstmate` refuses a dirty clone, a local branch with no upstream or unpushed commits, an unsafe detached HEAD, or newer files under `data/`, while completing the other scopes. The final leftovers report names every changed, pre-existing, unsafe, or third-party artifact it kept.
@@ -200,7 +202,7 @@ region = us-east-1
 
 ## Prerequisites
 
-Node 20+ (22+ if you also want OpenWiki), Pi (installed for you with `--install-pi`, or `npm install -g @earendil-works/pi-coding-agent`), the AWS CLI with a Bedrock-capable profile (previous section), git.
+Node 20+ (22.19+ for Pi / `--install-pi`; 22+ if you also want OpenWiki), Pi (installed for you with `--install-pi`, or `curl -fsSL https://pi.dev/install.sh | sh`), the AWS CLI with a Bedrock-capable profile (previous section), git.
 
 ## Files
 
@@ -251,6 +253,30 @@ Out of the box firstmate cuts each crewmate's worktree at the default branch, ha
 - `local-only` delivery (merge into local `main`) is disallowed under the policy.
 
 This works through firstmate's own instruction path rather than a script patch, so `git pull` keeps working. Its limits are honest ones: it relies on the orchestrator following the preference (firstmate is built around exactly that, but a human still reviews the PR base before merging), and `fm-fleet-sync` keeps refreshing the *default* branch in project clones, which is fine because worktrees reset to the ticket branch explicitly. Edit the policy file in this repo to change the wording; re-running the installer replaces the block.
+
+## hablo-config (runtime file editor)
+
+Step 15 builds `hablo-config` and installs it next to the other HABLO binaries. Launch it with:
+
+```sh
+hablo config
+hablo-config --print    # status chips, non-interactive
+hablo-config --check    # validate Jira/Dream/secrets mode; exit 1 on failure
+```
+
+It edits **existing runtime files as they are** (no machine overlay, no parallel schema):
+
+| Page | Files |
+| --- | --- |
+| Jira | `~/.hablo/jira/config.json` |
+| Secrets | Jira `envFile` / symlink target (mode `0600`); optional `aws sso login` and `hablo-jira doctor` |
+| Spy | front-end for `hablo-jira-agent spy` / `~/.hablo/jira/runs` |
+| Dream | `~/.hablo/dream/config.json` |
+| Firstmate | `config/backend`, `config/crew-harness`, `config/brief-include.md` |
+| CLI | stamped `DEFAULT_PROVIDER` / `DEFAULT_MODEL` in `hablo` (`HABLO_*` still wins at launch) |
+| Agent | `~/.hablo/agent` (`pi` or `claude`) plus `crew-harness`; warns if Claude is missing / not on `PATH`, but still saves. Does **not** install Claude Code |
+
+**Caveats:** the next `./install.sh` / `hablo update` may overwrite non-secret JSON rendered from `hablo.json`. There is no bedrouter stack/routing editor here (bedrouter owns that). `$comment*` keys are preserved where practical when saving JSON.
 
 ## Jira reporting and labelled-ticket dispatch
 

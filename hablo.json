@@ -49,7 +49,9 @@
       }
     },
     "$comment": "settings are applied only where the key is absent (never overriding a value you set); enabledModels is only extended when an allowlist already exists (creating one would hide every non-bedrouter provider).",
-    "cliPackage": "@earendil-works/pi-coding-agent"
+    "cliPackage": "@earendil-works/pi-coding-agent",
+    "$commentCliInstall": "cliInstallUrl: --install-pi runs this script (pi.dev managed install under ~/.pi/agent/install) instead of npm install -g, so pi survives nvm switches.",
+    "cliInstallUrl": "https://pi.dev/install.sh"
   },
   "bedrouter": {
     "home": "~/.bedrouter",

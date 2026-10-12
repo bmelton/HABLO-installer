@@ -5,6 +5,7 @@
 #   cd ~/code/myproject && hablo [pi options...]
 #   hablo ~/code/myproject [pi options...]   optional project path when the shell cwd is not the repo
 #   hablo update [--check]   move to the newest HABLO release and re-install it (--check only shows the plan)
+#   hablo config [flags]     edit runtime files (Jira, secrets, Spy, Dream, firstmate, CLI, Agent)
 #
 # Project directory: prefer the path you pass or the directory you launch from. If that is not a git repo
 # (common when a Herdr session was seeded at $HOME), fall back to the focused Herdr pane's cwd, then to
@@ -36,7 +37,7 @@ PROVIDER="${HABLO_PROVIDER:-$DEFAULT_PROVIDER}"
 MODEL="${HABLO_MODEL:-$DEFAULT_MODEL}"
 
 usage() {
-  sed -n '2,19p' "$0" | sed 's/^# \{0,1\}//'
+  sed -n '2,20p' "$0" | sed 's/^# \{0,1\}//'
   echo
   echo "env: FM_ROOT (firstmate checkout), FM_HOME (firstmate home, default FM_ROOT), HABLO_PROJECT_MODE (default direct-PR),"
   echo "     HABLO_PROVIDER / HABLO_MODEL (default $PROVIDER / $MODEL),"
@@ -48,6 +49,19 @@ case "${1:-}" in
   -h|--help|help) usage; exit 0;;
   # Reserved, so `hablo update` runs the updater instead of reaching Pi as a prompt.
   update) shift; exec node "$HABLO_INSTALLER/install.mjs" update "$@";;
+  # Runtime file editor (Bubble Tea). Prefer a sibling binary on PATH / next to this script.
+  config)
+    shift
+    for c in "$(dirname "$0")/hablo-config" "$HABLO_HOME/hablo-config" "hablo-config"; do
+      if [ "$c" = "hablo-config" ]; then
+        command -v hablo-config >/dev/null 2>&1 && exec hablo-config "$@"
+      elif [ -x "$c" ]; then
+        exec "$c" "$@"
+      fi
+    done
+    echo "hablo: hablo-config not found (re-run the HABLO installer)" >&2
+    exit 1
+    ;;
 esac
 
 [ -d "$FM_ROOT/bin" ] || { echo "hablo: firstmate checkout not found at $FM_ROOT (run the HABLO installer, or set FM_ROOT)" >&2; exit 1; }
@@ -134,8 +148,8 @@ RUNTIME="$(pick_runtime || true)"
 if [ -z "$RUNTIME" ]; then
   echo "hablo: need Pi >= $MIN_PI_VERSION on Node >= $MIN_NODE_VERSION (firstmate extensions use registerEntryRenderer)." >&2
   echo "       Your PATH's pi is too old or missing. Fix with:" >&2
-  echo "         nvm install $MIN_NODE_VERSION && nvm use $MIN_NODE_VERSION" >&2
-  echo "         npm install -g @earendil-works/pi-coding-agent" >&2
+  echo "         curl -fsSL https://pi.dev/install.sh | sh" >&2
+  echo "       (needs Node >= $MIN_NODE_VERSION and npm on PATH for the installer)" >&2
   echo "       Or: export HABLO_PI=/path/to/pi  (and put matching node first on PATH)" >&2
   if command -v pi >/dev/null 2>&1; then
     echo "       Currently: $(command -v pi) -> $(pi_version_of "$(command -v pi)" || echo unknown) ; node $(node -v 2>/dev/null || echo missing)" >&2

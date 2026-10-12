@@ -162,6 +162,18 @@ test("Wave 0 installs and disables tone policy while appending receipt runs", ()
     assert.ok(fs.existsSync(path.join(f.home, ".local", "bin", "hablo-jira")), installOutput);
     assert.ok(fs.existsSync(path.join(f.home, ".local", "bin", "hablo-jira-agent")), installOutput);
     assert.ok(fs.existsSync(path.join(f.home, ".local", "bin", "hablo-dream")), installOutput);
+    assert.ok(fs.existsSync(path.join(f.home, ".local", "bin", "hablo-config")), installOutput);
+    const configPrint = execFileSync(path.join(f.home, ".local", "bin", "hablo-config"), ["--print"], {
+      encoding: "utf8",
+      env: { ...process.env, HOME: f.home, PATH: `${path.join(f.home, ".local", "bin")}:${f.fakeBin}:${process.env.PATH}` },
+    });
+    assert.match(configPrint, /hablo-config status/);
+    assert.match(configPrint, /agent/);
+    const habloHelp = execFileSync("bash", [path.join(f.home, ".local", "bin", "hablo"), "--help"], {
+      encoding: "utf8",
+      env: { ...process.env, HOME: f.home },
+    });
+    assert.match(habloHelp, /hablo config/);
     const dreamConfig = JSON.parse(fs.readFileSync(path.join(f.home, ".hablo", "dream", "config.json"), "utf8"));
     assert.equal(dreamConfig.enabled, true);
     assert.equal(dreamConfig.model, "bedrouter/auto");
@@ -518,20 +530,51 @@ test("Wave 5 global and Pi scopes remove only receipt-owned installations", () =
       { kind: "script.install", name: "treehouse", wasPresent: false },
       { kind: "pi.package", name: "npm:pi-bedrouter", wasListed: false },
       { kind: "pi.package", name: "npm:user-package", wasListed: true },
-      { kind: "pi.cli", name: "@earendil-works/pi-coding-agent", manager: "npm", wasPresent: false }
+      { kind: "pi.cli", name: "@earendil-works/pi-coding-agent", manager: "pi.dev", source: "https://pi.dev/install.sh", wasPresent: false }
     ] }] }));
+    const managedRoot = path.join(f.agentDir, "install");
+    const launcher = path.join(f.agentDir, "bin", "pi");
+    fs.mkdirSync(path.join(managedRoot, "releases"), { recursive: true });
+    fs.mkdirSync(path.dirname(launcher), { recursive: true });
+    fs.writeFileSync(path.join(managedRoot, "managed-install.json"), JSON.stringify({
+      kind: "pi-managed-install", schemaVersion: 1, layout: "releases-v1",
+      entrypoint: { type: "symlink", path: path.join(bin, "pi") },
+    }));
+    fs.writeFileSync(launcher, "#!/bin/sh\n");
+    fs.symlinkSync(launcher, path.join(bin, "pi"));
     const allPlan = uninstall(f, ["--all", "--no-backup"]);
     assert.match(allPlan, /uninstall global npm package gh-axi/);
     assert.match(allPlan, /remove Pi package npm:pi-bedrouter/);
+    assert.match(allPlan, /uninstall managed Pi CLI/);
     const output = uninstall(f, ["--yes", "--with-globals", "--remove-pi", "--no-backup"]);
     const invoked = fs.readFileSync(calls, "utf8");
     assert.match(invoked, /npm uninstall -g gh-axi/);
     assert.match(invoked, /pi remove npm:pi-bedrouter/);
-    assert.match(invoked, /npm uninstall -g @earendil-works\/pi-coding-agent/);
+    assert.doesNotMatch(invoked, /npm uninstall -g @earendil-works\/pi-coding-agent/);
     assert.doesNotMatch(invoked, /quota-axi|user-package/);
     assert.equal(fs.existsSync(path.join(bin, "treehouse")), false);
+    assert.equal(fs.existsSync(managedRoot), false);
+    assert.equal(fs.existsSync(launcher), false);
+    assert.equal(fs.existsSync(path.join(bin, "pi")), false);
     assert.match(output, /quota-axi: was present before HABLO; kept/);
     assert.match(output, /npm:user-package: listed before HABLO; kept/);
+  } finally {
+    fs.rmSync(f.dir, { recursive: true, force: true });
+  }
+});
+
+test("Wave 5 still uninstalls legacy npm-global Pi CLI receipts", () => {
+  const f = fixture();
+  try {
+    const calls = path.join(f.dir, "uninstall-calls");
+    writeExecutable(path.join(f.fakeBin, "npm"), `#!/bin/sh\nprintf 'npm %s\n' "$*" >> ${JSON.stringify(calls)}\n`);
+    const receiptPath = path.join(f.home, ".hablo", "receipt.json");
+    fs.mkdirSync(path.dirname(receiptPath), { recursive: true });
+    fs.writeFileSync(receiptPath, JSON.stringify({ version: 1, runs: [{ actions: [
+      { kind: "pi.cli", name: "@earendil-works/pi-coding-agent", manager: "npm", wasPresent: false },
+    ] }] }));
+    uninstall(f, ["--yes", "--remove-pi", "--no-backup"]);
+    assert.match(fs.readFileSync(calls, "utf8"), /npm uninstall -g @earendil-works\/pi-coding-agent/);
   } finally {
     fs.rmSync(f.dir, { recursive: true, force: true });
   }

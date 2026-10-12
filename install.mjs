@@ -20,7 +20,7 @@
 //                    [--jira-env <path>]
 //                    [--skip-publish] [--publish-repo <owner/name>] [--publish-cred gh|env|auto]   team stats
 //                    [--skip-dream] [--dream-at HH:MM] [--no-dream-service]
-//                    [--install-pi] [--pi-manager npm|bun|pnpm]   install the Pi CLI itself when it is missing
+//                    [--install-pi]   install the Pi CLI via https://pi.dev/install.sh when it is missing
 //
 // Steps (each prints what it did or would do):
 //   0 restore     with --restore <tgz>: put personal state back (never overwrites an existing file unless --force-restore)
@@ -40,6 +40,7 @@
 //                 treehouse and no-mistakes via their install scripts into ~/.local/bin (no sudo)
 //  13 jira        build the reporting CLI and dispatch agent, render config, install and start the user scheduler
 //  14 dream       build the fleet correction digest, render config, install and start its daily timer
+//  15 config      build hablo-config (Bubble Tea runtime file editor); hablo config execs it
 import { execFileSync, spawnSync } from "node:child_process";
 import crypto from "node:crypto";
 import fs from "node:fs";
@@ -115,6 +116,12 @@ function writeText(p, text, options = {}) {
 function writeJson(p, obj, options) { writeText(p, JSON.stringify(obj, null, 2) + "\n", options); }
 const which = (cmd) => { const r = spawnSync(process.platform === "win32" ? "where" : "which", [cmd], { encoding: "utf8" }); return r.status === 0 ? r.stdout.trim().split("\n")[0] : undefined; };
 const run = (cmd, a, o = {}) => spawnSync(cmd, a, { encoding: "utf8", stdio: o.inherit ? "inherit" : "pipe", cwd: o.cwd, env: { ...process.env, ...o.env }, timeout: o.timeout ?? 300_000 });
+// Keep Go caches off the install HOME. Installer tests override HOME to a temp fixture; `go build` of
+// hablo-config would otherwise drop read-only module files under $HOME/go/pkg/mod and break fixture cleanup.
+const goEnv = {
+  GOCACHE: process.env.GOCACHE || path.join(os.tmpdir(), "hablo-gocache"),
+  GOMODCACHE: process.env.GOMODCACHE || path.join(os.tmpdir(), "hablo-gomodcache"),
+};
 // KEY=VALUE or export KEY=VALUE (shell-sourceable secrets files).
 const envHasAssign = (text, k) => new RegExp(`^\\s*(?:export\\s+)?${k}\\s*=\\s*\\S`, "m").test(text);
 const semverGte = (v, min) => Number(String(v).replace(/^v/, "").split(".")[0]) >= min;
@@ -279,9 +286,10 @@ function prerequisites() {
   const nodeOk = versionGte(node, piNodeMin);
   add("required", `Node.js ${piNodeMin}+ for Pi ${minPi}+ (found ${node}${nodeOk ? "" : sourceOf("node")})`, nodeOk, remedy("node"));
   const piVer = which("pi") ? firstLine("pi", ["--version"]).match(/\d+\.\d+\.\d+/)?.[0] : undefined;
+  const piInstallUrl = manifest.pi.cliInstallUrl ?? "https://pi.dev/install.sh";
   const piFix = nodeOk
-    ? { text: which("pi") ? "pi update --self" : `re-run with --install-pi, or: npm install -g ${cliPkgName}`, cmds: which("pi") ? ["pi update --self"] : [`npm install -g ${cliPkgName}`] }
-    : { text: `upgrade Node to ${piNodeMin}+ first (on ${node}, npm installs Pi 0.74.x instead of ${minPi}+), then: npm install -g ${cliPkgName}`, cmds: [] };
+    ? { text: which("pi") ? "pi update" : `re-run with --install-pi, or: curl -fsSL ${piInstallUrl} | sh`, cmds: which("pi") ? ["pi update"] : [`curl -fsSL ${piInstallUrl} | sh`] }
+    : { text: `upgrade Node to ${piNodeMin}+ first (Pi's installer needs it), then: curl -fsSL ${piInstallUrl} | sh`, cmds: [] };
   if (!which("pi")) add(flag("install-pi") && nodeOk ? "optional" : "required", `Pi CLI ${minPi}+${flag("install-pi") ? " (step 1 installs it)" : ""}`, flag("install-pi") && nodeOk, piFix);
   else if (!piVer) add("recommended", `Pi CLI ${minPi}+ (version unreadable${sourceOf("pi")})`, false, { text: "run `pi --version` and check that it prints a version", cmds: [] });
   else add("required", `Pi CLI ${minPi}+ (found ${piVer}${versionGte(piVer, minPi) ? "" : sourceOf("pi")})`, versionGte(piVer, minPi), piFix);
@@ -305,7 +313,7 @@ function prerequisites() {
     const goOk = Boolean(goVer && versionGte(goVer, "1.22.0"));
     add("recommended", `Go 1.22+ (Jira and Dream are built from source)${goVer ? ` (found ${goVer}${goOk ? "" : sourceOf("go")})` : ""}`, goOk, remedy("go"));
   }
-  if (!flag("skip-tools")) add("recommended", "curl (installs treehouse and no-mistakes)", Boolean(which("curl")), remedy("curl"));
+  if (!flag("skip-tools") || flag("install-pi")) add("recommended", "curl (--install-pi, treehouse, no-mistakes)", Boolean(which("curl")), remedy("curl"));
   if (!flag("skip-cli")) {
     const binDir = expand(opt("bin-dir", manifest.cli.binDir));
     const rc = /zsh$/.test(process.env.SHELL ?? "") ? "~/.zshrc" : "~/.bashrc";
@@ -449,6 +457,7 @@ if (piBin) {
   if (pathDirs[0] !== piBinDir) process.env.PATH = [piBinDir, ...pathDirs.filter((d) => d && d !== piBinDir)].join(path.delimiter);
 }
 const cliPkg = manifest.pi.cliPackage;
+const cliInstallUrl = manifest.pi.cliInstallUrl ?? "https://pi.dev/install.sh";
 const minPiCli = manifest.pi.minCliVersion;
 const piNodeFloor = (() => {
   try {
@@ -456,40 +465,46 @@ const piNodeFloor = (() => {
     return String(eng.node ?? "").match(/>=\s*(\d+\.\d+\.\d+)/)?.[1] ?? "22.19.0";
   } catch { return "22.19.0"; }
 })();
+if (args.includes("--pi-manager")) warn("--pi-manager is ignored; --install-pi uses the pi.dev managed installer");
 if (!piBin && flag("install-pi")) {
   if (!versionGte(process.versions.node, piNodeFloor)) {
-    fail(`Node ${process.versions.node} is below ${piNodeFloor}, which Pi ${minPiCli}+ requires. npm would install an older Pi (0.74.x) instead. Upgrade Node, then re-run with --install-pi.`);
+    fail(`Node ${process.versions.node} is below ${piNodeFloor}, which Pi ${minPiCli}+ requires. Upgrade Node, then re-run with --install-pi.`);
   }
-  // npm first: on Homebrew/nvm setups its global bin dir is already on PATH. bun/pnpm work too but usually need a PATH line.
-  const mgr = opt("pi-manager", ["npm", "bun", "pnpm"].find((m) => which(m)) ?? "npm");
-  const cmd = { npm: ["npm", ["install", "-g", cliPkg]], bun: ["bun", ["add", "-g", cliPkg]], pnpm: ["pnpm", ["add", "-g", cliPkg]] }[mgr];
-  if (!cmd) fail(`--pi-manager must be npm, bun or pnpm (got ${mgr})`);
-  did(`${cmd[0]} ${cmd[1].join(" ")}`);
+  if (!which("curl")) fail(`curl is required for --install-pi (${cliInstallUrl})`);
+  if (!which("npm")) fail("npm is required for --install-pi (the pi.dev installer uses it to stage the managed release)");
+  // Prefer ~/.local/bin so the managed installer can symlink there (it only chooses PATH dirs that already exist).
+  const localBin = path.join(home, ".local", "bin");
+  if (!DRY) fs.mkdirSync(localBin, { recursive: true });
+  const installPath = [localBin, path.join(agentDir, "bin"), process.env.PATH ?? ""].filter(Boolean).join(path.delimiter);
+  did(`curl -fsSL ${cliInstallUrl} | sh      (pi.dev managed install under ${homePath(path.join(agentDir, "install"))})`);
   if (!DRY) {
-    const r = run(cmd[0], cmd[1], { inherit: true, timeout: 600_000 });
-    if (r.status !== 0) fail(`${cmd[0]} could not install ${cliPkg} (exit ${r.status}); on EACCES use a user-level global prefix (nvm, or \`npm config set prefix ~/.npm-global\`)`);
-    record({ kind: "pi.cli", name: cliPkg, manager: mgr, wasPresent: false });
+    // detached → new session without a controlling TTY, so pi.dev skips its menus and "Start pi now?" prompt.
+    const r = spawnSync("sh", ["-c", `curl -fsSL "${cliInstallUrl}" | sh`], {
+      stdio: ["ignore", "inherit", "inherit"],
+      env: { ...process.env, PATH: installPath, HOME: home, PI_CODING_AGENT_DIR: agentDir },
+      timeout: 600_000,
+      detached: true,
+    });
+    if (r.status !== 0) fail(`pi.dev installer failed (exit ${r.status}); run by hand:  curl -fsSL ${cliInstallUrl} | sh`);
+    record({ kind: "pi.cli", name: cliPkg, manager: "pi.dev", source: cliInstallUrl, wasPresent: false });
+    process.env.PATH = installPath;
     piBin = which("pi");
     if (!piBin) {
-      // not on PATH yet: ask the manager where its global bin is, use it for this run, and say what to add permanently
-      const binDir = mgr === "bun" ? (run("bun", ["pm", "bin", "-g"]).stdout?.trim() || path.join(home, ".bun", "bin"))
-        : mgr === "pnpm" ? (run("pnpm", ["bin", "-g"]).stdout?.trim() || "")
-        : path.join(run("npm", ["prefix", "-g"]).stdout?.trim() || "", "bin");
-      const candidate = binDir && path.join(binDir, "pi");
-      if (candidate && fs.existsSync(candidate)) {
-        process.env.PATH = `${binDir}${path.delimiter}${process.env.PATH}`;
-        piBin = candidate;
-        note(`pi installed to ${binDir}, which is not on your PATH. Using it for this run; add this to your shell rc:\n         export PATH="${binDir}:$PATH"`);
-      } else fail(`${cliPkg} installed but \`pi\` is not on PATH; open a new shell or add your global bin directory to PATH, then re-run`);
+      const candidates = [path.join(localBin, "pi"), path.join(agentDir, "bin", "pi")];
+      const found = candidates.find((p) => fs.existsSync(p));
+      if (found) {
+        piBin = found;
+        note(`pi installed to ${path.dirname(found)}, which is not on your PATH. Using it for this run; add this to your shell rc:\n         export PATH="${path.dirname(found)}:$PATH"`);
+      } else fail(`pi.dev installer finished but \`pi\` was not found; open a new shell or run:  curl -fsSL ${cliInstallUrl} | sh`);
     }
     const installedPi = (run("pi", ["--version"]).stdout || "").match(/\d+\.\d+\.\d+/)?.[0];
     if (!installedPi || !versionGte(installedPi, minPiCli)) {
-      fail(`npm installed Pi ${installedPi ?? "unknown"}, but this release needs ${minPiCli}+. Node ${process.versions.node} is too old for current Pi (needs ${piNodeFloor}+), so npm picked a legacy build. Upgrade Node, then: npm install -g ${cliPkg}`);
+      fail(`pi.dev installed Pi ${installedPi ?? "unknown"}, but this release needs ${minPiCli}+. Run: pi update`);
     }
   }
 }
-if (!piBin && !DRY) fail(`pi is not installed. Re-run with --install-pi, or install it yourself:  npm install -g ${cliPkg}`);
-note(piBin ? `pi   ${run("pi", ["--version"]).stdout?.trim() || piBin}` : `pi   would be installed (${cliPkg})`);
+if (!piBin && !DRY) fail(`pi is not installed. Re-run with --install-pi, or install it yourself:  curl -fsSL ${cliInstallUrl} | sh`);
+note(piBin ? `pi   ${run("pi", ["--version"]).stdout?.trim() || piBin}` : `pi   would be installed (${cliInstallUrl})`);
 const awsBin = which("aws");
 const goBin = which("go");
 
@@ -1090,7 +1105,7 @@ else {
   const builds = [["hablo-jira", "./cmd/hablo-jira"], ...(!agentSkipped ? [[jira.agent.binName ?? "hablo-jira-agent", "./cmd/hablo-jira-agent"]] : [])];
   for (const [name, pkg] of builds) {
     const dst = path.join(jiraBinDir, name); did(`build ${dst}`);
-    if (!DRY) { const prior=fileState(dst); const r = run("go", ["build", "-trimpath", "-o", dst, pkg], { cwd: path.join(here, "jira"), timeout: 600_000 }); if (r.status !== 0) { warn(`could not build ${name}: ${(r.stderr || r.stdout).trim().split("\n")[0]}`); continue; } fs.chmodSync(dst, 0o755); record({ kind: prior.exists ? "file.update" : "file.create", path: homePath(dst), sha256: sha256(fs.readFileSync(dst)), ...(prior.sha256 ? { priorSha256: prior.sha256 } : {}) }); }
+    if (!DRY) { const prior=fileState(dst); const r = run("go", ["build", "-trimpath", "-o", dst, pkg], { cwd: path.join(here, "jira"), timeout: 600_000, env: goEnv }); if (r.status !== 0) { warn(`could not build ${name}: ${(r.stderr || r.stdout).trim().split("\n")[0]}`); continue; } fs.chmodSync(dst, 0o755); record({ kind: prior.exists ? "file.update" : "file.create", path: homePath(dst), sha256: sha256(fs.readFileSync(dst)), ...(prior.sha256 ? { priorSha256: prior.sha256 } : {}) }); }
   }
   writeJson(path.join(jiraHome, "config.json"), jira);
   did(`render ${path.join(jiraHome, "config.json")}`);
@@ -1155,7 +1170,7 @@ else {
   did(`build ${dreamBin}`);
   if (!DRY) {
     const prior = fileState(dreamBin);
-    const r = run("go", ["build", "-trimpath", "-o", dreamBin, "./cmd/hablo-dream"], { cwd: path.join(here, "dream"), timeout: 600_000 });
+    const r = run("go", ["build", "-trimpath", "-o", dreamBin, "./cmd/hablo-dream"], { cwd: path.join(here, "dream"), timeout: 600_000, env: goEnv });
     if (r.status !== 0) warn(`could not build hablo-dream: ${(r.stderr || r.stdout).trim().split("\n")[0]}`);
     else { fs.chmodSync(dreamBin, 0o755); record({ kind: prior.exists ? "file.update" : "file.create", path: homePath(dreamBin), sha256: sha256(fs.readFileSync(dreamBin)), ...(prior.sha256 ? { priorSha256: prior.sha256 } : {}) }); }
   }
@@ -1178,7 +1193,27 @@ else {
   } else note("Dream service skipped (--no-dream-service)");
 }
 
+// ---- 15 hablo-config TUI ------------------------------------------------------------------------------------------------
+step(15, "hablo-config TUI (runtime file editor)");
+if (!goBin || !versionGte((run("go", ["version"]).stdout ?? "").match(/go(\d+\.\d+(?:\.\d+)?)/)?.[1] ?? "0", "1.22.0")) {
+  warn("hablo-config skipped: Go 1.22+ is required (https://go.dev/dl/)");
+} else {
+  const configBin = path.join(binDir, "hablo-config");
+  did(`build ${configBin}`);
+  if (!DRY) {
+    fs.mkdirSync(binDir, { recursive: true });
+    const prior = fileState(configBin);
+    const r = run("go", ["build", "-trimpath", "-o", configBin, "./cmd/hablo-config"], { cwd: path.join(here, "config"), timeout: 600_000, env: goEnv });
+    if (r.status !== 0) warn(`could not build hablo-config: ${(r.stderr || r.stdout).trim().split("\n")[0]}`);
+    else {
+      fs.chmodSync(configBin, 0o755);
+      record({ kind: prior.exists ? "file.update" : "file.create", path: homePath(configBin), sha256: sha256(fs.readFileSync(configBin)), ...(prior.sha256 ? { priorSha256: prior.sha256 } : {}) });
+    }
+  }
+  note("edit runtime files with: hablo config   (or hablo-config --print / --check)");
+}
+
 // ---- done ---------------------------------------------------------------------------------------------------------------
 log(`\nDone${DRY ? " (dry run; nothing written)" : ""}${warnings.length ? ` with ${warnings.length} warning(s):\n  - ${warnings.join("\n  - ")}` : ""}.`);
-log(`Next:\n  pi --provider bedrouter --model auto\n  /bedrouter status      /bedrouter probe      /bedrouter report\n  in a repo with a wiki: /openwiki doctor${flag("skip-firstmate") ? "" : `\n  firstmate: cd <your project> && hablo       -  or cd ${fmDir} && pi`}`);
+log(`Next:\n  pi --provider bedrouter --model auto\n  /bedrouter status      /bedrouter probe      /bedrouter report\n  in a repo with a wiki: /openwiki doctor${flag("skip-firstmate") ? "" : `\n  firstmate: cd <your project> && hablo       -  or cd ${fmDir} && pi`}\n  hablo config            - edit Jira / secrets / Dream / Agent (runtime files)`);
 if (!profile) log(`  (set AWS_PROFILE in ${envPath}, then: aws sso login --profile <name>)`);
