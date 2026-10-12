@@ -73,6 +73,8 @@ function install(f, extra = []) {
       HOME: f.home,
       PI_CODING_AGENT_DIR: f.agentDir,
       PATH: `${f.fakeBin}:${process.env.PATH}`,
+      // Offline pin: do not hit enterprise GitHub from unit tests.
+      HABLO_INTERROGATE_FIXTURE: path.join(root, "interrogate", "testdata", "upstream-skill"),
     },
   });
 }
@@ -142,7 +144,13 @@ test("Wave 0 installs and disables tone policy while appending receipt runs", ()
     assert.match(captain, /HABLO:OPENWIKI-POLICY:START/);
     assert.match(captain, /HABLO:TICKET-POLICY:START/);
     assert.match(captain, /HABLO:MODEL-POLICY:START/);
+    assert.doesNotMatch(captain, /HABLO:INTERROGATE-POLICY/);
     assert.match(captain, /no `--project` flag/);
+    assert.ok(fs.existsSync(path.join(f.agentDir, "skills", "technical-design-doc", "SKILL.md")), installOutput);
+    assert.match(fs.readFileSync(path.join(f.agentDir, "skills", "technical-design-doc", "SKILL.md"), "utf8"), /HABLO overlay/);
+    assert.ok(fs.existsSync(path.join(f.home, ".hablo", "interrogate", "adr-template.md")));
+    const iqRuntime = JSON.parse(fs.readFileSync(path.join(f.home, ".hablo", "interrogate.json"), "utf8"));
+    assert.equal(iqRuntime.enabled, false);
     assert.match(captain, /fm-brief\.sh <task-id> <repo-name>/);
     assert.match(captain, /Jira key is an exact string/);
     assert.match(captain, /not\*\* a Jira project/);
@@ -217,6 +225,28 @@ test("Wave 0 installs and disables tone policy while appending receipt runs", ()
     assert.equal(secondReceipt.runs.length, 2);
     assert.ok(secondReceipt.runs[1].actions.some((action) => action.kind === "block.remove" && action.marker === "HABLO:TONE-POLICY"));
     assert.ok(secondReceipt.runs[1].actions.some((action) => action.kind === "file.remove" && action.path === "~/.hablo/tone.md"));
+  } finally {
+    fs.rmSync(f.dir, { recursive: true, force: true });
+  }
+});
+
+test("interrogate flag installs captain policy and keeps skill pin", () => {
+  const f = fixture();
+  try {
+    install(f, ["--interrogate"]);
+    const captain = fs.readFileSync(path.join(f.firstmate, "data", "captain.md"), "utf8");
+    assert.match(captain, /HABLO:INTERROGATE-POLICY:START/);
+    assert.match(captain, /skip interrogate/);
+    assert.match(captain, /~\/tdds/);
+    const iq = JSON.parse(fs.readFileSync(path.join(f.home, ".hablo", "interrogate.json"), "utf8"));
+    assert.equal(iq.enabled, true);
+    assert.ok(fs.existsSync(path.join(f.agentDir, "skills", "technical-design-doc", "SKILL.md")));
+    install(f, ["--no-interrogate"]);
+    const off = fs.readFileSync(path.join(f.firstmate, "data", "captain.md"), "utf8");
+    assert.doesNotMatch(off, /HABLO:INTERROGATE-POLICY/);
+    assert.equal(JSON.parse(fs.readFileSync(path.join(f.home, ".hablo", "interrogate.json"), "utf8")).enabled, false);
+    // Soft-keep: skill remains after toggle off.
+    assert.ok(fs.existsSync(path.join(f.agentDir, "skills", "technical-design-doc", "SKILL.md")));
   } finally {
     fs.rmSync(f.dir, { recursive: true, force: true });
   }
