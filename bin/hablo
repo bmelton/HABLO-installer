@@ -306,6 +306,17 @@ export FM_ROOT_OVERRIDE="$root_real"
 export FM_HOME="${FM_HOME:-$root_real}"
 export PATH="$root_real/bin:$PATH"
 
+# Pi's pi-bedrouter sends process.env.BEDROUTER_API_KEY (else the literal "bedrouter").
+# Claude install writes a real key into ~/.bedrouter/.env; without exporting it, Pi gets 401.
+if [ -z "${BEDROUTER_API_KEY:-}" ]; then
+  _br_env="${BEDROUTER_ENV:-${BEDROUTER_HOME:-$HOME/.bedrouter}/.env}"
+  if [ -f "$_br_env" ]; then
+    _br_key="$(grep -E '^\s*(export\s+)?BEDROUTER_API_KEY=' "$_br_env" | head -1 | sed -E 's/^[^=]+=//;s/^["'\'']//;s/["'\'']$//')"
+    [ -n "$_br_key" ] && export BEDROUTER_API_KEY="$_br_key"
+  fi
+  unset _br_env _br_key
+fi
+
 # Resolve the voyage before launching. Pi accepts provider/id in --model; Claude Code uses a bare model
 # (usually auto) against ANTHROPIC_BASE_URL. HABLO_CREW_MODEL is what the captain prompt tells spawn to use.
 has_provider=0; has_model=0; cli_provider=""; cli_model=""; expect=""
