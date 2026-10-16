@@ -10,7 +10,8 @@ tasks:
   test:
     desc: Run the installer, Jira, and Dream tests
     cmds:
-      - node --test test/
+      # Glob the files: Node 24 treats a bare `test/` directory as a module path and fails.
+      - node --test test/*.mjs
       - task: jira:test
       - task: dream:test
 
